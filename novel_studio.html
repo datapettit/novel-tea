@@ -1,0 +1,1529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Novel Studio – OpenAI HTML Client</title>
+  <script
+    src="https://code.jquery.com/jquery-3.7.1.min.js"
+    integrity="sha256-3fp9ZC2XqVbk7NpN/mBlC9ZwTe74MkRU2w35T0XkzU0="
+    crossorigin="anonymous"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #0b0c10;
+      color: #e5e5e5;
+      font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+    #app {
+      display: flex;
+      height: 100vh;
+    }
+    #sidebar {
+      width: 260px;
+      border-right: 1px solid #1f2833;
+      background: #0b0c10;
+      padding: 10px;
+      box-sizing: border-box;
+    }
+    #main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .section-title {
+      font-weight: bold;
+      margin-top: 10px;
+      margin-bottom: 4px;
+      color: #66fcf1;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    input, select, button, textarea {
+      font-family: inherit;
+      font-size: 13px;
+    }
+    input[type=text], input[type=password] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 4px 6px;
+      border-radius: 3px;
+      border: 1px solid #1f2833;
+      background: #0b0c10;
+      color: #e5e5e5;
+    }
+    button {
+      background: #45a29e;
+      border: none;
+      color: #0b0c10;
+      padding: 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+    button:hover {
+      background: #66fcf1;
+    }
+    button.small {
+      font-size: 11px;
+      padding: 2px 6px;
+      margin-left: 4px;
+    }
+    #terminal {
+      flex: 1;
+      background: #0b0c10;
+      padding: 10px;
+      overflow-y: auto;
+      border-bottom: 1px solid #1f2833;
+      box-sizing: border-box;
+      font-size: 13px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+    }
+    #terminal .line {
+      margin: 2px 0;
+    }
+    #terminal .line .prefix {
+      color: #45a29e;
+    }
+    #terminal .line.error {
+      color: #ff6b6b;
+    }
+    #controls {
+      padding: 8px;
+      border-top: 1px solid #1f2833;
+      background: #0b0c10;
+      box-sizing: border-box;
+      font-size: 13px;
+    }
+    #project-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #1f2833;
+      padding: 4px;
+      border-radius: 3px;
+      font-size: 12px;
+    }
+    .project-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 2px 0;
+    }
+    .project-name {
+      cursor: pointer;
+      color: #c5c6c7;
+    }
+    .project-name:hover {
+      color: #66fcf1;
+      text-decoration: underline;
+    }
+    .project-actions button {
+      background: #1f2833;
+      color: #c5c6c7;
+      font-size: 10px;
+      padding: 2px 4px;
+      margin-left: 3px;
+    }
+    .project-actions button:hover {
+      background: #45a29e;
+      color: #0b0c10;
+    }
+    .divider {
+      height: 1px;
+      background: #1f2833;
+      margin: 8px 0;
+    }
+    #status-bar {
+      font-size: 11px;
+      color: #c5c6c7;
+      margin-top: 4px;
+    }
+    #controls-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 4px;
+    }
+    .control-group {
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      padding: 6px;
+      min-width: 220px;
+      max-width: 360px;
+    }
+    .control-group-title {
+      font-weight: bold;
+      margin-bottom: 4px;
+      color: #66fcf1;
+      font-size: 12px;
+    }
+    .control-group button {
+      display: block;
+      width: 100%;
+      margin-top: 4px;
+      text-align: left;
+      font-size: 12px;
+    }
+    a.download-link {
+      color: #66fcf1;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+    #file-upload-input {
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <div class="section-title">API Key</div>
+    <input type="password" id="api-key-input" placeholder="Enter OpenAI API key" />
+    <button id="set-api-key-btn">Set API Key</button>
+    <div id="api-key-status" style="font-size:11px;color:#c5c6c7;margin-top:4px;">
+      Not set
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-title">Projects (novel - ...)</div>
+    <div id="project-list"></div>
+
+    <input type="text" id="new-project-name" placeholder="New project name (without 'novel -')" style="margin-top:6px;" />
+    <button id="create-project-btn">Create Project</button>
+    <button id="delete-project-btn" style="background:#ff6b6b;color:#0b0c10;margin-top:4px;">Delete Selected</button>
+
+    <div id="current-project-label" style="margin-top:10px;font-size:12px;color:#c5c6c7;">
+      Current project: <span id="current-project-name">None</span>
+    </div>
+  </div>
+
+  <div id="main">
+    <div id="terminal"></div>
+    <div id="controls">
+      <div class="section-title" style="margin-top:0;">Project Controls</div>
+      <div id="controls-grid">
+        <div class="control-group">
+          <div class="control-group-title">Setup & Docs</div>
+          <button id="init-assistants-btn">Initialize / Recreate Assistants</button>
+
+          <div style="margin-top:6px;font-size:11px;">Upload documents to vector stores:</div>
+          <select id="doc-category-select">
+            <option value="characters">characters</option>
+            <option value="locations">locations</option>
+            <option value="relationships">relationships</option>
+            <option value="storyline">storyline</option>
+            <option value="history">history</option>
+            <option value="outlines">outlines</option>
+            <option value="drafts">drafts</option>
+          </select>
+          <input type="file" id="file-upload-input" multiple />
+          <button id="upload-docs-btn">Upload Docs for Category</button>
+          <button id="list-category-files-btn">List Files in Category</button>
+          <button id="remove-category-file-btn">Remove File from Category</button>
+        </div>
+
+        <div class="control-group">
+          <div class="control-group-title">Outlines</div>
+          <button id="build-trilogy-outline-btn">Build Trilogy Outline (Markdown)</button>
+          <button id="build-book-outline-btn">Build Book Outline (JSON)</button>
+        </div>
+
+        <div class="control-group">
+          <div class="control-group-title">Chapters</div>
+          <button id="draft-chapter-btn">Draft a Chapter From JSON Outline</button>
+          <button id="draft-whole-book1-btn">Draft Entire Book 1 Automatically</button>
+          <button id="edit-chapter-btn">Review / Edit a Chapter</button>
+        </div>
+
+        <div class="control-group">
+          <div class="control-group-title">Review & Audio</div>
+          <button id="review-book-btn">Book-Level Consistency Review</button>
+          <button id="tts-chapter-btn">Generate TTS for a Chapter</button>
+        </div>
+
+        <div class="control-group">
+          <div class="control-group-title">Sora / Video</div>
+          <button id="sora-stub-btn">(Stub) Sora / Video Generation</button>
+        </div>
+      </div>
+
+      <div id="status-bar">
+        Ready.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+
+  // ==============================
+  // GLOBAL STATE
+  // ==============================
+
+  let apiKey = null;
+  const PROJECTS_KEY = "novelStudioProjects"; // localStorage key
+  let projects = {}; // { projectName: {name, assistants, vectorStores, outlines, chapters} }
+  let currentProjectName = null;
+
+  function logLine(message, isError = false) {
+    const $line = $("<div>").addClass("line");
+    if (isError) $line.addClass("error");
+    const prefix = isError ? "[ERR]" : "[LOG]";
+    $line.append($("<span>").addClass("prefix").text(prefix + " "));
+    $line.append(document.createTextNode(message));
+    $("#terminal").append($line);
+    $("#terminal").scrollTop($("#terminal")[0].scrollHeight);
+  }
+
+  function setStatus(message) {
+    $("#status-bar").text(message);
+  }
+
+  function loadProjectsFromStorage() {
+    try {
+      const raw = localStorage.getItem(PROJECTS_KEY);
+      if (raw) {
+        projects = JSON.parse(raw);
+      } else {
+        projects = {};
+      }
+    } catch (e) {
+      logLine("Failed to load projects from localStorage: " + e, true);
+      projects = {};
+    }
+  }
+
+  function saveProjectsToStorage() {
+    try {
+      localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+    } catch (e) {
+      logLine("Failed to save projects to localStorage: " + e, true);
+    }
+  }
+
+  function refreshProjectListUI() {
+    const $list = $("#project-list");
+    $list.empty();
+    const names = Object.keys(projects).sort();
+    if (names.length === 0) {
+      $list.append($("<div>").text("(no projects yet)"));
+      return;
+    }
+    names.forEach((name) => {
+      const $item = $("<div>").addClass("project-item");
+      const $name = $("<span>").addClass("project-name").text(name);
+      $name.on("click", () => {
+        selectProject(name);
+      });
+
+      const $actions = $("<span>").addClass("project-actions");
+      const $loadBtn = $("<button>").text("Load").on("click", () => {
+        selectProject(name);
+      });
+      $actions.append($loadBtn);
+
+      $item.append($name).append($actions);
+      $list.append($item);
+    });
+  }
+
+  function ensureProjectStructure(project) {
+    if (!project.assistants) project.assistants = {};
+    if (!project.vectorStores) project.vectorStores = {};
+    if (!project.outlines) project.outlines = {};
+    if (!project.chapters) project.chapters = {};
+    return project;
+  }
+
+  function selectProject(name) {
+    if (!projects[name]) {
+      logLine("Project not found: " + name, true);
+      return;
+    }
+    currentProjectName = name;
+    $("#current-project-name").text(name);
+    logLine("Switched to project: " + name);
+    setStatus("Project " + name + " loaded.");
+  }
+
+  function getCurrentProject() {
+    if (!currentProjectName || !projects[currentProjectName]) {
+      logLine("No project loaded.", true);
+      return null;
+    }
+    return ensureProjectStructure(projects[currentProjectName]);
+  }
+
+  // ==============================
+  // OPENAI API HELPERS
+  // ==============================
+
+  function requireApiKey() {
+    if (!apiKey) {
+      logLine("API key not set. Please enter and set your OpenAI API key.", true);
+      return false;
+    }
+    return true;
+  }
+
+  async function openaiJson(path, method = "POST", body = null, useAssistantsBeta = false) {
+    if (!requireApiKey()) throw new Error("No API key");
+    const headers = {
+      "Authorization": "Bearer " + apiKey,
+      "Content-Type": "application/json",
+    };
+    if (useAssistantsBeta) {
+      headers["OpenAI-Beta"] = "assistants=v2";
+    }
+    const res = await fetch("https://api.openai.com/v1" + path, {
+      method: method,
+      headers: headers,
+      body: body ? JSON.stringify(body) : null,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error("OpenAI API error (" + res.status + "): " + text);
+    }
+    return await res.json();
+  }
+
+  async function openaiFormData(path, formData, useAssistantsBeta = false) {
+    if (!requireApiKey()) throw new Error("No API key");
+    const headers = {
+      "Authorization": "Bearer " + apiKey,
+    };
+    if (useAssistantsBeta) {
+      headers["OpenAI-Beta"] = "assistants=v2";
+    }
+    const res = await fetch("https://api.openai.com/v1" + path, {
+      method: "POST",
+      headers: headers, // don't set Content-Type manually; browser will
+      body: formData,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error("OpenAI API error (" + res.status + "): " + text);
+    }
+    return await res.json();
+  }
+
+  async function openaiAudio(path, body) {
+    if (!requireApiKey()) throw new Error("No API key");
+    const headers = {
+      "Authorization": "Bearer " + apiKey,
+      "Content-Type": "application/json",
+    };
+    const res = await fetch("https://api.openai.com/v1" + path, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error("OpenAI Audio API error (" + res.status + "): " + text);
+    }
+    // Expect binary audio
+    return await res.blob();
+  }
+
+  async function runAssistantOnce(assistantId, userText) {
+    // Use combined thread+run creation endpoint:
+    // POST /v1/threads/runs with {assistant_id, thread: {messages:[...]}}
+    const body = {
+      assistant_id: assistantId,
+      thread: {
+        messages: [
+          {
+            role: "user",
+            content: userText,
+          },
+        ],
+      },
+    };
+    const runObj = await openaiJson("/threads/runs", "POST", body, true);
+    const threadId = runObj.thread_id;
+    const runId = runObj.id;
+
+    // Poll run until completed
+    let attempts = 0;
+    while (true) {
+      attempts++;
+      const run = await openaiJson(`/threads/${threadId}/runs/${runId}`, "GET", null, true);
+      if (run.status === "completed") {
+        break;
+      }
+      if (["failed", "cancelled", "expired"].includes(run.status)) {
+        throw new Error("Run ended with status: " + run.status);
+      }
+      if (attempts > 60) {
+        throw new Error("Run polling timed out.");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    // Retrieve messages
+    const msgs = await openaiJson(`/threads/${threadId}/messages?limit=20`, "GET", null, true);
+    if (!msgs.data || msgs.data.length === 0) {
+      return "";
+    }
+    // Find first assistant message
+    for (const msg of msgs.data) {
+      if (msg.role === "assistant") {
+        let textParts = [];
+        for (const c of msg.content || []) {
+          if (c.type === "text" && c.text && c.text.value) {
+            textParts.push(c.text.value);
+          }
+        }
+        return textParts.join("\\n").trim();
+      }
+    }
+    return "";
+  }
+
+  // ==============================
+  // OPENAI RESOURCES (ASSISTANTS, VECTOR STORES, FILES)
+  // ==============================
+
+  async function ensureVectorStore(project, category) {
+    project.vectorStores = project.vectorStores || {};
+    if (project.vectorStores[category]) return project.vectorStores[category];
+
+    const res = await openaiJson("/vector_stores", "POST", {
+      name: project.name + " [" + category + "]",
+    }, true);
+    const vsId = res.id;
+    project.vectorStores[category] = vsId;
+    logLine("Created vector store for '" + category + "': " + vsId);
+    saveProjectsToStorage();
+    return vsId;
+  }
+
+  async function uploadFileToOpenAI(file) {
+    const form = new FormData();
+    form.append("purpose", "assistants");
+    form.append("file", file, file.name);
+    const res = await openaiFormData("/files", form, true);
+    return res; // {id, ...}
+  }
+
+  async function attachFileToVectorStore(vsId, fileId) {
+    return await openaiJson(`/vector_stores/${vsId}/files`, "POST", {
+      file_id: fileId,
+    }, true);
+  }
+
+  async function listVectorStoreFiles(vsId) {
+    return await openaiJson(`/vector_stores/${vsId}/files`, "GET", null, true);
+  }
+
+  async function deleteVectorStoreFile(vsId, fileId) {
+    return await openaiJson(`/vector_stores/${vsId}/files/${fileId}`, "DELETE", null, true);
+  }
+
+  async function deleteOpenAIFile(fileId) {
+    return await openaiJson(`/files/${fileId}`, "DELETE", null, true);
+  }
+
+  async function retrieveOpenAIFile(fileId) {
+    return await openaiJson(`/files/${fileId}`, "GET", null, true);
+  }
+
+  async function createOrGetAssistant(project, roleName, instructions, useFileSearch) {
+    project.assistants = project.assistants || {};
+    if (project.assistants[roleName]) {
+      return project.assistants[roleName];
+    }
+    const tools = [];
+    let toolResources = undefined;
+    if (useFileSearch) {
+      const vsIds = Object.values(project.vectorStores || {});
+      tools.push({ type: "file_search" });
+      if (vsIds.length > 0) {
+        toolResources = {
+          file_search: {
+            vector_store_ids: vsIds,
+          },
+        };
+      }
+    }
+    const body = {
+      name: project.name + " [" + roleName + "]",
+      instructions: instructions,
+      model: "gpt-4o",
+      tools: tools,
+    };
+    if (toolResources) {
+      body.tool_resources = toolResources;
+    }
+    const res = await openaiJson("/assistants", "POST", body, true);
+    project.assistants[roleName] = res.id;
+    saveProjectsToStorage();
+    logLine("Created assistant '" + roleName + "': " + res.id);
+    return res.id;
+  }
+
+  async function initAssistantsForProject(project) {
+    setStatus("Initializing assistants...");
+    logLine("Initializing assistants for project: " + project.name);
+
+    const loreInstructions = `
+You are the definitive lorekeeper for this novel project.
+Use file_search to consult character sheets, locations, relationships,
+storyline, history, and outlines.
+
+Rules:
+- Treat uploaded documents as canonical.
+- When conflicts exist, prefer the latest or most detailed doc.
+- Be specific and grounded.
+- If unsure, explicitly mark information as uncertain.
+`.trim();
+
+    const architectInstructions = `
+You are the SERIES ARCHITECT for a high dark fantasy trilogy.
+Tone: Witcher / LOTR / D&D, with strong romance, found family, and emotional angst.
+
+Task:
+- Using all accessible lore and notes, propose a clean 3-book structure.
+- For each book:
+  - Premise & primary conflict
+  - Thematic focus
+  - Protagonist's emotional arc
+  - Key supporting character arcs
+  - 6–10 tentpole events.
+`.trim();
+
+    const outlinerInstructions = `
+You are the BOOK OUTLINER for this trilogy.
+
+You must ALWAYS output a single JSON object following this exact structure:
+
+{
+  "book_number": <int>,
+  "title": "<working title>",
+  "acts": [
+    {
+      "act_number": <int>,
+      "act_title": "<string>",
+      "chapters": [
+        {
+          "chapter_number": <int>,
+          "chapter_title": "<string>",
+          "pov": "<character name>",
+          "location": "<string>",
+          "summary": "<2–6 sentence summary>",
+          "emotional_goal": "<emotional purpose of chapter>",
+          "target_words": <int>,
+          "scene_beats": ["beat1", "beat2", "..."]
+        }
+      ]
+    }
+  ]
+}
+
+Rules:
+- ALWAYS output valid JSON.
+- DO NOT include commentary or explanation outside the JSON.
+- Maintain the dark fantasy tone in summaries and beats,
+  but the output must remain syntactically valid JSON.
+`.trim();
+
+    const drafterInstructions = `
+You are the CHAPTER DRAFTER.
+You take structured chapter beats and turn them into full scenes.
+
+Rules:
+- Close third-person POV, deep in the specified character's head.
+- Respect lore, relationships, injuries, and magic rules.
+- Make scenes vivid and emotional without purple prose.
+- Maintain continuity with prior chapters if context is provided.
+`.trim();
+
+    const lineEditorInstructions = `
+You are a LINE & PROSE EDITOR.
+Given a draft chapter:
+- Improve clarity, pacing, flow, and dialogue.
+- Remove repetition, sharpen descriptions.
+- Preserve events, POV, and emotional beats.
+- Keep the established voice and tense.
+Output ONLY the edited chapter text.
+`.trim();
+
+    const continuityInstructions = `
+You are the CONTINUITY EDITOR.
+Use file_search to cross-check a chapter against lore and previous material.
+
+Steps:
+1) List continuity issues (numbered) and proposed fixes.
+2) Output a corrected version of the chapter incorporating those fixes.
+
+Check:
+- Character details (appearance, injuries, knowledge, personality)
+- Magic rules & limitations
+- Geography, timeline, history
+- Relationship and emotional continuity
+`.trim();
+
+    const bookReviewerInstructions = `
+You are the BOOK-LEVEL REVIEWER.
+You read multiple chapters and evaluate:
+
+- Overall plot coherence and pacing
+- Thematic unity
+- Character arc consistency
+- Romantic / emotional through-lines
+- Tone and voice consistency
+- Structural issues (dragging sections, missing setup/payoff)
+
+Provide:
+- A high-level summary of the current book as written.
+- A bullet list of major strengths.
+- A bullet list of major issues.
+- Concrete suggestions for restructuring or tightening the narrative.
+`.trim();
+
+    project.vectorStores = project.vectorStores || {};
+
+    await createOrGetAssistant(project, "LoreKeeper", loreInstructions, true);
+    await createOrGetAssistant(project, "SeriesArchitect", architectInstructions, true);
+    await createOrGetAssistant(project, "BookOutliner", outlinerInstructions, true);
+    await createOrGetAssistant(project, "ChapterDrafter", drafterInstructions, true);
+    await createOrGetAssistant(project, "LineEditor", lineEditorInstructions, false);
+    await createOrGetAssistant(project, "ContinuityEditor", continuityInstructions, true);
+    await createOrGetAssistant(project, "BookReviewer", bookReviewerInstructions, true);
+
+    setStatus("Assistants initialized.");
+    logLine("Assistants initialized.");
+  }
+
+  async function runProjectAssistant(project, roleName, userText) {
+    if (!project.assistants || !project.assistants[roleName]) {
+      logLine("Assistant '" + roleName + "' not found. Initialize first.", true);
+      return "";
+    }
+    setStatus("Running assistant: " + roleName);
+    const result = await runAssistantOnce(project.assistants[roleName], userText);
+    setStatus("Assistant run complete: " + roleName);
+    return result;
+  }
+
+  function chapterKey(bookNumber, act, chapter) {
+    return `book_${bookNumber}_act_${act}_chapter_${chapter}`;
+  }
+
+  // ==============================
+  // WORKFLOWS: OUTLINES & CHAPTERS
+  // ==============================
+
+  async function buildTrilogyOutline(project) {
+    const prompt = `
+Using all available lore, campaign notes, and outlines in this project:
+- Propose a 3-book trilogy structure.
+- Follow your system instructions.
+
+Structure your answer like:
+
+1. Trilogy Overview
+2. Book 1 - [Working Title]
+3. Book 2 - [Working Title]
+4. Book 3 - [Working Title]
+`.trim();
+
+    const text = await runProjectAssistant(project, "SeriesArchitect", prompt);
+    if (!text) {
+      logLine("No trilogy outline returned.", true);
+      return;
+    }
+
+    project.outlines = project.outlines || {};
+    project.outlines["trilogy_markdown"] = { text: text };
+    saveProjectsToStorage();
+
+    logLine("Trilogy outline generated.");
+    const blob = new Blob([text], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const $link = $("<a>")
+      .addClass("download-link")
+      .attr("href", url)
+      .attr("download", "trilogy_outline.md")
+      .text("Download trilogy_outline.md");
+    logLine("Click to download trilogy outline: ");
+    $("#terminal").append($link).append("<br/>");
+  }
+
+  async function buildBookOutline(project) {
+    const bookNumberStr = prompt("Which book number? (e.g. 1, 2, 3)", "1");
+    const bookNumber = parseInt(bookNumberStr || "1", 10) || 1;
+
+    const promptText = `
+Using the trilogy outline (if available) and all project lore:
+- Create a structured JSON outline for Book ${bookNumber} exactly matching the schema in your system instructions.
+`.trim();
+
+    const raw = await runProjectAssistant(project, "BookOutliner", promptText);
+    if (!raw) {
+      logLine("No outline returned for Book " + bookNumber, true);
+      return;
+    }
+
+    let outlineJson;
+    try {
+      outlineJson = JSON.parse(raw);
+    } catch (e) {
+      logLine("Invalid JSON outline returned: " + e, true);
+      logLine("Raw outline (first 1000 chars): " + raw.slice(0, 1000), true);
+      return;
+    }
+
+    project.outlines = project.outlines || {};
+    const key = "book_" + bookNumber;
+    const old = project.outlines[key];
+    if (old && old.fileId) {
+      try {
+        await deleteOpenAIFile(old.fileId);
+        logLine("Deleted old outline file from OpenAI: " + old.fileId);
+      } catch (e) {
+        logLine("Failed to delete old outline file: " + e, true);
+      }
+    }
+
+    const vsId = await ensureVectorStore(project, "outlines");
+    const jsonBlob = new Blob([JSON.stringify(outlineJson, null, 2)], { type: "application/json" });
+    const jsonFile = new File([jsonBlob], `book_${bookNumber}_outline.json`, { type: "application/json" });
+    const fileRes = await uploadFileToOpenAI(jsonFile);
+    await attachFileToVectorStore(vsId, fileRes.id);
+
+    project.outlines[key] = {
+      fileId: fileRes.id,
+      json: outlineJson,
+    };
+    saveProjectsToStorage();
+    logLine("Book " + bookNumber + " outline stored and uploaded. FileId: " + fileRes.id);
+
+    const dlBlob = new Blob([JSON.stringify(outlineJson, null, 2)], { type: "application/json" });
+    const dlUrl = URL.createObjectURL(dlBlob);
+    const $link = $("<a>")
+      .addClass("download-link")
+      .attr("href", dlUrl)
+      .attr("download", `book_${bookNumber}_outline.json`)
+      .text(`Download book_${bookNumber}_outline.json`);
+    logLine("Click to download JSON outline: ");
+    $("#terminal").append($link).append("<br/>");
+  }
+
+  async function draftChapter(project) {
+    const bookStr = prompt("Book number (e.g. 1):", "1");
+    const bookNumber = parseInt(bookStr || "1", 10) || 1;
+    const act = prompt("Act (e.g. 1, 2, 3):", "1") || "1";
+    const chapterNum = prompt("Chapter number (e.g. 1, 2, 3):", "1") || "1";
+
+    project.outlines = project.outlines || {};
+    const outlineEntry = project.outlines["book_" + bookNumber];
+    if (!outlineEntry || !outlineEntry.json) {
+      logLine("No JSON outline found for Book " + bookNumber + ". Build it first.", true);
+      return;
+    }
+    const outline = outlineEntry.json;
+    const acts = outline.acts || [];
+    let chapterStruct = null;
+    for (const actObj of acts) {
+      if (String(actObj.act_number) === String(act)) {
+        for (const ch of actObj.chapters || []) {
+          if (String(ch.chapter_number) === String(chapterNum)) {
+            chapterStruct = ch;
+            break;
+          }
+        }
+      }
+      if (chapterStruct) break;
+    }
+    if (!chapterStruct) {
+      logLine("Chapter not found in JSON outline.", true);
+      return;
+    }
+
+    const pov = chapterStruct.pov || "Unknown";
+    const title = chapterStruct.chapter_title || ("Chapter " + chapterNum);
+    const targetWords = chapterStruct.target_words || 3000;
+    const summary = chapterStruct.summary || "";
+    const emotionalGoal = chapterStruct.emotional_goal || "";
+    const beatsList = chapterStruct.scene_beats || [];
+    const beatsText = beatsList.map((b) => "- " + b).join("\n");
+
+    const promptText = `
+Draft the following chapter for this novel.
+
+Book: ${bookNumber}
+Act: ${act}
+Chapter: ${chapterNum}
+Title: ${title}
+POV: ${pov}
+Target words: ${targetWords}
+
+Chapter Summary:
+${summary}
+
+Emotional Goal:
+${emotionalGoal}
+
+Scene Beats:
+${beatsText}
+
+Please write the full chapter, following your system-level drafting rules.
+`.trim();
+
+    const chapterText = await runProjectAssistant(project, "ChapterDrafter", promptText);
+    if (!chapterText) {
+      logLine("No chapter text returned.", true);
+      return;
+    }
+
+    project.chapters = project.chapters || {};
+    const key = chapterKey(bookNumber, act, chapterNum);
+    const old = project.chapters[key];
+    if (old && old.fileId) {
+      try {
+        await deleteOpenAIFile(old.fileId);
+        logLine("Deleted old chapter file from OpenAI: " + old.fileId);
+      } catch (e) {
+        logLine("Failed to delete old chapter file: " + e, true);
+      }
+    }
+
+    const vsId = await ensureVectorStore(project, "drafts");
+    const textBlob = new Blob([chapterText], { type: "text/markdown" });
+    const textFile = new File(
+      [textBlob],
+      `book${bookNumber}_act${act}_chapter${chapterNum}_draft.md`,
+      { type: "text/markdown" }
+    );
+    const fileRes = await uploadFileToOpenAI(textFile);
+    await attachFileToVectorStore(vsId, fileRes.id);
+
+    project.chapters[key] = {
+      fileId: fileRes.id,
+      text: chapterText,
+    };
+    saveProjectsToStorage();
+
+    logLine(`Drafted chapter: Book ${bookNumber}, Act ${act}, Chapter ${chapterNum}. FileId: ${fileRes.id}`);
+
+    const dlBlob = new Blob([chapterText], { type: "text/markdown" });
+    const dlUrl = URL.createObjectURL(dlBlob);
+    const $link = $("<a>")
+      .addClass("download-link")
+      .attr("href", dlUrl)
+      .attr("download", `book${bookNumber}_act${act}_chapter${chapterNum}_draft.md`)
+      .text(`Download chapter draft (Book ${bookNumber} Act ${act} Ch ${chapterNum})`);
+    logLine("Click to download draft: ");
+    $("#terminal").append($link).append("<br/>");
+  }
+
+  async function draftWholeBook(project, bookNumber) {
+    project.outlines = project.outlines || {};
+    const outlineEntry = project.outlines["book_" + bookNumber];
+    if (!outlineEntry || !outlineEntry.json) {
+      logLine(`No JSON outline found for Book ${bookNumber}. Build it first.`, true);
+      return;
+    }
+    const outline = outlineEntry.json;
+    const acts = outline.acts || [];
+    if (!acts.length) {
+      logLine("Outline has no acts.", true);
+      return;
+    }
+
+    logLine(`Drafting entire Book ${bookNumber}...`);
+
+    const sortedActs = [...acts].sort((a, b) => (a.act_number || 0) - (b.act_number || 0));
+    project.chapters = project.chapters || {};
+    const vsId = await ensureVectorStore(project, "drafts");
+
+    for (const actObj of sortedActs) {
+      const actNum = actObj.act_number;
+      const chapters = actObj.chapters || [];
+      const sortedChapters = [...chapters].sort((a, b) => (a.chapter_number || 0) - (b.chapter_number || 0));
+
+      for (const ch of sortedChapters) {
+        const chNum = ch.chapter_number;
+        const pov = ch.pov || "Unknown";
+        const title = ch.chapter_title || `Chapter ${chNum}`;
+        const targetWords = ch.target_words || 3000;
+        const summary = ch.summary || "";
+        const emotionalGoal = ch.emotional_goal || "";
+        const beatsList = ch.scene_beats || [];
+        const beatsText = beatsList.map((b) => "- " + b).join("\n");
+
+        logLine(`--- Drafting Book ${bookNumber} | Act ${actNum} | Chapter ${chNum} ---`);
+
+        const promptText = `
+Draft the following chapter for this novel.
+
+Book: ${bookNumber}
+Act: ${actNum}
+Chapter: ${chNum}
+Title: ${title}
+POV: ${pov}
+Target words: ${targetWords}
+
+Chapter Summary:
+${summary}
+
+Emotional Goal:
+${emotionalGoal}
+
+Scene Beats:
+${beatsText}
+
+Please write the full chapter now, following your system-level drafting rules.
+`.trim();
+
+        try {
+          const chapterText = await runProjectAssistant(project, "ChapterDrafter", promptText);
+          if (!chapterText) {
+            logLine(`No text returned for Book ${bookNumber}, Act ${actNum}, Chapter ${chNum}.`, true);
+            continue;
+          }
+
+          const key = chapterKey(bookNumber, actNum, chNum);
+          const old = project.chapters[key];
+          if (old && old.fileId) {
+            try {
+              await deleteOpenAIFile(old.fileId);
+              logLine("Deleted old chapter file from OpenAI: " + old.fileId);
+            } catch (e) {
+              logLine("Failed to delete old chapter file: " + e, true);
+            }
+          }
+
+          const textBlob = new Blob([chapterText], { type: "text/markdown" });
+          const fileName = `book${bookNumber}_act${actNum}_chapter${chNum}_draft.md`;
+          const textFile = new File([textBlob], fileName, { type: "text/markdown" });
+          const fileRes = await uploadFileToOpenAI(textFile);
+          await attachFileToVectorStore(vsId, fileRes.id);
+
+          project.chapters[key] = {
+            fileId: fileRes.id,
+            text: chapterText,
+          };
+          saveProjectsToStorage();
+
+          logLine(`Drafted Book ${bookNumber}, Act ${actNum}, Chapter ${chNum}. FileId: ${fileRes.id}`);
+        } catch (e) {
+          logLine(`Error drafting Book ${bookNumber}, Act ${actNum}, Chapter ${chNum}: ` + e.message, true);
+        }
+      }
+    }
+
+    logLine(`Finished drafting entire Book ${bookNumber}.`);
+  }
+
+  async function editChapter(project) {
+    const bookStr = prompt("Book number (e.g. 1):", "1");
+    const bookNumber = parseInt(bookStr || "1", 10) || 1;
+    const act = prompt("Act (e.g. 1, 2, 3):", "1") || "1";
+    const chapterNum = prompt("Chapter number:", "1") || "1";
+
+    project.chapters = project.chapters || {};
+    const key = chapterKey(bookNumber, act, chapterNum);
+    let entry = project.chapters[key];
+
+    let chapterText;
+    if (entry && entry.text) {
+      chapterText = entry.text;
+    } else {
+      chapterText = prompt("No stored chapter text for this key. Paste the chapter text to edit:", "");
+      if (!chapterText) {
+        logLine("No chapter text provided.", true);
+        return;
+      }
+    }
+
+    logLine(`Running line edit for Book ${bookNumber}, Act ${act}, Chapter ${chapterNum}...`);
+
+    const lineEditPrompt = `
+Please line-edit the following chapter:
+- Improve clarity, pacing, rhythm, and dialogue.
+- Preserve all events, POV, and emotional beats.
+- Keep the same tense and overall voice.
+Output ONLY the edited chapter text.
+
+`.trim();
+
+    const lineEdited = await runProjectAssistant(
+      project,
+      "LineEditor",
+      lineEditPrompt + "\n\n" + chapterText
+    );
+    if (!lineEdited) {
+      logLine("Line editor returned no text.", true);
+      return;
+    }
+
+    logLine("Running continuity pass...");
+
+    const contPrompt = `
+Check this chapter against project lore and prior material using file_search.
+
+1) List continuity issues and how to fix them.
+2) Then output a corrected version of the chapter.
+
+Format:
+
+ISSUES:
+1. ...
+
+CORRECTED CHAPTER:
+[chapter text]
+`.trim();
+
+    const contResult = await runProjectAssistant(
+      project,
+      "ContinuityEditor",
+      contPrompt + "\n\n" + lineEdited
+    );
+    if (!contResult) {
+      logLine("Continuity editor returned no text.", true);
+      return;
+    }
+
+    const finalText = contResult;
+    project.chapters[key] = project.chapters[key] || {};
+    project.chapters[key].text = finalText;
+
+    const vsId = await ensureVectorStore(project, "drafts");
+    const oldFileId = project.chapters[key].fileId;
+    if (oldFileId) {
+      try {
+        await deleteOpenAIFile(oldFileId);
+        logLine("Deleted old OpenAI file for chapter: " + oldFileId);
+      } catch (e) {
+        logLine("Failed to delete old file: " + e, true);
+      }
+    }
+
+    const textBlob = new Blob([finalText], { type: "text/markdown" });
+    const fileName = `book${bookNumber}_act${act}_chapter${chapterNum}_edited_with_continuity.md`;
+    const textFile = new File([textBlob], fileName, { type: "text/markdown" });
+    const fileRes = await uploadFileToOpenAI(textFile);
+    await attachFileToVectorStore(vsId, fileRes.id);
+
+    project.chapters[key].fileId = fileRes.id;
+    saveProjectsToStorage();
+
+    logLine(`Edited chapter stored. FileId: ${fileRes.id}`);
+
+    const dlUrl = URL.createObjectURL(textBlob);
+    const $link = $("<a>")
+      .addClass("download-link")
+      .attr("href", dlUrl)
+      .attr("download", fileName)
+      .text(`Download edited chapter (Book ${bookNumber} Act ${act} Ch ${chapterNum})`);
+    logLine("Click to download edited chapter: ");
+    $("#terminal").append($link).append("<br/>");
+  }
+
+  async function reviewWholeBook(project) {
+    const bookStr = prompt("Which book number to review? (e.g. 1):", "1");
+    const bookNumber = parseInt(bookStr || "1", 10) || 1;
+
+    project.chapters = project.chapters || {};
+    const keys = Object.keys(project.chapters).filter((k) =>
+      k.startsWith(`book_${bookNumber}_`)
+    );
+    if (!keys.length) {
+      logLine("No chapters recorded for Book " + bookNumber, true);
+      return;
+    }
+    keys.sort();
+
+    const combinedParts = [];
+    for (const key of keys) {
+      const ch = project.chapters[key];
+      if (!ch.text) {
+        logLine(`Chapter ${key} has no stored text, skipping.`, true);
+        continue;
+      }
+      combinedParts.push(`\n\n===== ${key} =====\n\n${ch.text}\n`);
+    }
+    if (!combinedParts.length) {
+      logLine("No chapter text available for that book.", true);
+      return;
+    }
+
+    const combinedText = combinedParts.join("");
+    const promptText = `
+Below is a collection of chapters from this novel project.
+
+Please:
+- Summarize the current book as written.
+- Identify strengths and weaknesses in plot, character arcs, pacing, and tone.
+- Highlight any apparent inconsistencies or confusing elements.
+- Suggest concrete restructuring or revisions to improve unity and focus.
+`.trim();
+
+    const reviewText = await runProjectAssistant(
+      project,
+      "BookReviewer",
+      promptText + "\n\n" + combinedText
+    );
+    if (!reviewText) {
+      logLine("BookReviewer returned no text.", true);
+      return;
+    }
+
+    const blob = new Blob([reviewText], { type: "text/markdown" });
+    const fileName = `book_${bookNumber}_level_review.md`;
+    const url = URL.createObjectURL(blob);
+
+    logLine("Book-level review generated for Book " + bookNumber);
+    const $link = $("<a>")
+      .addClass("download-link")
+      .attr("href", url)
+      .attr("download", fileName)
+      .text(`Download book_${bookNumber}_level_review.md`);
+    $("#terminal").append($link).append("<br/>");
+  }
+
+  async function ttsForChapter(project) {
+    const bookStr = prompt("Book number (for lookup in stored text, e.g. 1):", "1");
+    const bookNumber = parseInt(bookStr || "1", 10) || 1;
+    const act = prompt("Act:", "1") || "1";
+    const chapterNum = prompt("Chapter:", "1") || "1";
+
+    project.chapters = project.chapters || {};
+    const key = chapterKey(bookNumber, act, chapterNum);
+    const entry = project.chapters[key];
+    let text;
+    if (entry && entry.text) {
+      text = entry.text;
+    } else {
+      text = prompt("No stored text found. Paste the chapter text to read aloud:", "");
+      if (!text) {
+        logLine("No text provided.", true);
+        return;
+      }
+    }
+
+    const maxChars = 3500;
+    let narratorText = text;
+    if (text.length > maxChars) {
+      narratorText = text.slice(0, maxChars);
+      logLine("Chapter text is long; truncating to " + maxChars + " characters for narrator TTS.");
+    }
+
+    logLine("Generating narrator TTS (voice: alloy)...");
+    const narratorBlob = await openaiAudio("/audio/speech", {
+      model: "tts-1",
+      voice: "alloy",
+      input: narratorText,
+      response_format: "mp3",
+    });
+    const narratorUrl = URL.createObjectURL(narratorBlob);
+    const narratorFileName = `book${bookNumber}_act${act}_chapter${chapterNum}_narrator.mp3`;
+    const $narrLink = $("<a>")
+      .addClass("download-link")
+      .attr("href", narratorUrl)
+      .attr("download", narratorFileName)
+      .text("Download narrator audio");
+    logLine("Narrator audio ready: ");
+    $("#terminal").append($narrLink).append("<br/>");
+
+    if (confirm("Generate a MALE voice clip for some lines?")) {
+      const maleSnippet = prompt("Paste the text for the MALE voice:", "");
+      if (maleSnippet) {
+        logLine("Generating male TTS (voice: onyx)...");
+        const maleBlob = await openaiAudio("/audio/speech", {
+          model: "tts-1",
+          voice: "onyx",
+          input: maleSnippet.slice(0, maxChars),
+          response_format: "mp3",
+        });
+        const maleUrl = URL.createObjectURL(maleBlob);
+        const maleFileName = `book${bookNumber}_act${act}_chapter${chapterNum}_male.mp3`;
+        const $maleLink = $("<a>")
+          .addClass("download-link")
+          .attr("href", maleUrl)
+          .attr("download", maleFileName)
+          .text("Download male voice audio");
+        logLine("Male voice audio ready: ");
+        $("#terminal").append($maleLink).append("<br/>");
+      }
+    }
+
+    if (confirm("Generate a FEMALE voice clip for some lines?")) {
+      const femaleSnippet = prompt("Paste the text for the FEMALE voice:", "");
+      if (femaleSnippet) {
+        logLine("Generating female TTS (voice: nova)...");
+        const femaleBlob = await openaiAudio("/audio/speech", {
+          model: "tts-1",
+          voice: "nova",
+          input: femaleSnippet.slice(0, maxChars),
+          response_format: "mp3",
+        });
+        const femaleUrl = URL.createObjectURL(femaleBlob);
+        const femaleFileName = `book${bookNumber}_act${act}_chapter${chapterNum}_female.mp3`;
+        const $femaleLink = $("<a>")
+          .addClass("download-link")
+          .attr("href", femaleUrl)
+          .attr("download", femaleFileName)
+          .text("Download female voice audio");
+        logLine("Female voice audio ready: ");
+        $("#terminal").append($femaleLink).append("<br/>");
+      }
+    }
+
+    logLine("TTS generation complete.");
+  }
+
+  async function soraStub() {
+    logLine("Sora / video generation is not implemented in this HTML client yet.");
+    logLine("You can add a call to the video endpoint once your access is ready.");
+  }
+
+  // ==============================
+  // DOC / VECTOR STORE UI ACTIONS
+  // ==============================
+
+  async function uploadDocsForCategory(project) {
+    const category = $("#doc-category-select").val();
+    const files = $("#file-upload-input")[0].files;
+    if (!files || files.length === 0) {
+      logLine("No files selected for upload.", true);
+      return;
+    }
+    const vsId = await ensureVectorStore(project, category);
+    for (const file of files) {
+      try {
+        logLine(`Uploading file "${file.name}" for category "${category}"...`);
+        const fileRes = await uploadFileToOpenAI(file);
+        await attachFileToVectorStore(vsId, fileRes.id);
+        logLine(`Uploaded fileId=${fileRes.id} into vector_store=${vsId}`);
+      } catch (e) {
+        logLine("Error uploading file: " + e.message, true);
+      }
+    }
+    $("#file-upload-input").val("");
+  }
+
+  async function listFilesInCategory(project) {
+    const category = $("#doc-category-select").val();
+    const vsId = project.vectorStores && project.vectorStores[category];
+    if (!vsId) {
+      logLine("No vector store for category '" + category + "'.", true);
+      return;
+    }
+    logLine(`Listing files for category '${category}' (vs: ${vsId})...`);
+    const res = await listVectorStoreFiles(vsId);
+    if (!res.data || !res.data.length) {
+      logLine("No files in that vector store.");
+      return;
+    }
+    for (const item of res.data) {
+      const meta = await retrieveOpenAIFile(item.id);
+      logLine(`  fileId=${item.id} | filename=${meta.filename} | status=${item.status}`);
+    }
+  }
+
+  async function removeFileFromCategory(project) {
+    const category = $("#doc-category-select").val();
+    const vsId = project.vectorStores && project.vectorStores[category];
+    if (!vsId) {
+      logLine("No vector store for category '" + category + "'.", true);
+      return;
+    }
+    const fileId = prompt("Enter the fileId to remove from this category:", "");
+    if (!fileId) return;
+    try {
+      await deleteVectorStoreFile(vsId, fileId);
+      logLine("Removed file from vector store: " + fileId);
+      if (confirm("Also delete this file from OpenAI files?")) {
+        await deleteOpenAIFile(fileId);
+        logLine("Deleted file from OpenAI: " + fileId);
+      }
+    } catch (e) {
+      logLine("Error removing file: " + e.message, true);
+    }
+  }
+
+  // ==============================
+  // UI WIRING
+  // ==============================
+
+  $(function () {
+    loadProjectsFromStorage();
+    refreshProjectListUI();
+    logLine("Novel Studio HTML client loaded.");
+    setStatus("Ready.");
+
+    $("#set-api-key-btn").on("click", function () {
+      const key = $("#api-key-input").val().trim();
+      if (!key) {
+        apiKey = null;
+        $("#api-key-status").text("Not set");
+        logLine("API key cleared.");
+      } else {
+        apiKey = key;
+        $("#api-key-status").text("Set (stored only in memory)");
+        logLine("API key set in memory.");
+      }
+    });
+
+    $("#create-project-btn").on("click", function () {
+      let rawName = $("#new-project-name").val().trim();
+      if (!rawName) {
+        rawName = "untitled";
+      }
+      let name = rawName.startsWith("novel -") ? rawName : "novel - " + rawName;
+      if (projects[name]) {
+        alert("Project already exists with that name.");
+        return;
+      }
+      projects[name] = ensureProjectStructure({
+        name: name,
+      });
+      saveProjectsToStorage();
+      refreshProjectListUI();
+      selectProject(name);
+      $("#new-project-name").val("");
+    });
+
+    $("#delete-project-btn").on("click", function () {
+      if (!currentProjectName || !projects[currentProjectName]) {
+        alert("No project currently selected.");
+        return;
+      }
+      if (!confirm("Delete project '" + currentProjectName + "' from localStorage? This does NOT delete OpenAI resources.")) {
+        return;
+      }
+      delete projects[currentProjectName];
+      saveProjectsToStorage();
+      currentProjectName = null;
+      $("#current-project-name").text("None");
+      refreshProjectListUI();
+      logLine("Deleted project (local only).");
+    });
+
+    $("#init-assistants-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await initAssistantsForProject(project);
+      } catch (e) {
+        logLine("Error initializing assistants: " + e.message, true);
+      }
+    });
+
+    $("#upload-docs-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await uploadDocsForCategory(project);
+      } catch (e) {
+        logLine("Error uploading docs: " + e.message, true);
+      }
+    });
+
+    $("#list-category-files-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await listFilesInCategory(project);
+      } catch (e) {
+        logLine("Error listing files: " + e.message, true);
+      }
+    });
+
+    $("#remove-category-file-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await removeFileFromCategory(project);
+      } catch (e) {
+        logLine("Error removing file: " + e.message, true);
+      }
+    });
+
+    $("#build-trilogy-outline-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await buildTrilogyOutline(project);
+      } catch (e) {
+        logLine("Error building trilogy outline: " + e.message, true);
+      }
+    });
+
+    $("#build-book-outline-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await buildBookOutline(project);
+      } catch (e) {
+        logLine("Error building book outline: " + e.message, true);
+      }
+    });
+
+    $("#draft-chapter-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await draftChapter(project);
+      } catch (e) {
+        logLine("Error drafting chapter: " + e.message, true);
+      }
+    });
+
+    $("#draft-whole-book1-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      if (!confirm("Draft entire Book 1 from its JSON outline? This may use many tokens.")) {
+        return;
+      }
+      try {
+        await draftWholeBook(project, 1);
+      } catch (e) {
+        logLine("Error drafting whole Book 1: " + e.message, true);
+      }
+    });
+
+    $("#edit-chapter-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await editChapter(project);
+      } catch (e) {
+        logLine("Error editing chapter: " + e.message, true);
+      }
+    });
+
+    $("#review-book-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await reviewWholeBook(project);
+      } catch (e) {
+        logLine("Error in book-level review: " + e.message, true);
+      }
+    });
+
+    $("#tts-chapter-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await ttsForChapter(project);
+      } catch (e) {
+        logLine("Error generating TTS: " + e.message, true);
+      }
+    });
+
+    $("#sora-stub-btn").on("click", async function () {
+      await soraStub();
+    });
+  });
+</script>
+</body>
+</html>
