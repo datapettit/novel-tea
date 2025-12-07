@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <title>Novel Studio – OpenAI HTML Client</title>
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <style>
     body {
       margin: 0;
@@ -590,7 +589,6 @@
   let assistantModel = ASSISTANT_MODELS[0];
   let currentCharacterName = null;
   let consoleExpanded = false;
-  let canvasActive = false;
 
   function fileToDataUrl(file) {
     return new Promise((resolve, reject) => {
@@ -612,120 +610,6 @@
       u8arr[n] = bstr.charCodeAt(n);
     }
     return new File([u8arr], filename, { type: mime });
-  }
-
-  function escapeXml(text) {
-    return (text || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/\"/g, "&quot;")
-      .replace(/'/g, "&apos;");
-  }
-
-  function buildDocxDocumentXml(text) {
-    const paragraphs = (text || "").split(/\r?\n/);
-    const body = paragraphs
-      .map((line) => `<w:p><w:r><w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r></w:p>`)
-      .join("");
-    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" mc:Ignorable="w14 wp14">
-  <w:body>${body}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr></w:body>
-</w:document>`;
-  }
-
-  async function generateDocxFromText(text) {
-    const zip = new JSZip();
-    zip.file(
-      "[Content_Types].xml",
-      `<?xml version="1.0" encoding="UTF-8"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-</Types>`
-    );
-    zip.folder("_rels").file(
-      ".rels",
-      `<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-</Relationships>`
-    );
-    const word = zip.folder("word");
-    word.folder("_rels").file(
-      "document.xml.rels",
-      `<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/officeDocument/2006/relationships"></Relationships>`
-    );
-    word.file("document.xml", buildDocxDocumentXml(text));
-    return await zip.generateAsync({
-      type: "blob",
-      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    });
-  }
-
-  function decodeXmlEntities(str) {
-    const txt = document.createElement("textarea");
-    txt.innerHTML = str;
-    return txt.value;
-  }
-
-  async function extractDocxText(file) {
-    const data = await file.arrayBuffer();
-    const zip = await JSZip.loadAsync(data);
-    const docFile = zip.file("word/document.xml");
-    if (!docFile) throw new Error("Invalid docx: missing document.xml");
-    const xml = await docFile.async("string");
-    const matches = [...xml.matchAll(/<w:t[^>]*>(.*?)<\/w:t>/g)];
-    const text = matches.map((m) => decodeXmlEntities(m[1])).join("\n");
-    return text.trim();
-  }
-
-  function showSelectModal(title, options) {
-    return new Promise((resolve) => {
-      const backdrop = document.createElement("div");
-      backdrop.className = "modal-backdrop";
-
-      const box = document.createElement("div");
-      box.className = "modal-box";
-
-      const h4 = document.createElement("h4");
-      h4.textContent = title;
-      box.appendChild(h4);
-
-      const select = document.createElement("select");
-      select.style.width = "100%";
-      options.forEach((opt) => {
-        const o = document.createElement("option");
-        o.value = opt.value;
-        o.textContent = opt.label;
-        select.appendChild(o);
-      });
-      box.appendChild(select);
-
-      const actions = document.createElement("div");
-      actions.className = "modal-actions";
-      const cancelBtn = document.createElement("button");
-      cancelBtn.textContent = "Cancel";
-      cancelBtn.onclick = () => {
-        document.body.removeChild(backdrop);
-        resolve(null);
-      };
-      const okBtn = document.createElement("button");
-      okBtn.textContent = "Confirm";
-      okBtn.onclick = () => {
-        const val = select.value;
-        document.body.removeChild(backdrop);
-        resolve(val || null);
-      };
-      actions.appendChild(cancelBtn);
-      actions.appendChild(okBtn);
-      box.appendChild(actions);
-
-      backdrop.appendChild(box);
-      document.body.appendChild(backdrop);
-    });
   }
 
   function logToConsolePanel(message, isError = false) {
@@ -887,9 +771,6 @@
     currentCharacterName = cleanName;
     saveProjectsToStorage();
     refreshCharacterSelectUI(project);
-    if (canvasActive) {
-      $("#canvas-character-name").text(cleanName);
-    }
     logLine("Working on character: " + cleanName);
   }
 
@@ -901,9 +782,6 @@
     currentProjectName = name;
     $("#current-project-name").text(name);
     currentCharacterName = null;
-    canvasActive = false;
-    $("#character-canvas").removeClass("visible");
-    $("#terminal").removeClass("hidden");
     refreshCharacterSelectUI(projects[name]);
     logLine("Switched to project: " + name);
     setStatus("Project " + name + " loaded.");
@@ -1311,8 +1189,8 @@ When asked about photos:
   function getActiveCharacterName(project) {
     const selected = $("#character-select").val();
     const typed = $("#character-name-input").val().trim();
-    if (selected) return selected;
     if (typed) return typed;
+    if (selected) return selected;
     if (currentCharacterName) return currentCharacterName;
     const names = Object.keys(project?.characters || {});
     return names[0] || null;
@@ -1338,146 +1216,51 @@ Return a short bullet list with: character name, why they matter, and a suggeste
     logLine("Potential characters to add:\n" + text);
   }
 
-  function showCharacterCanvas(project, name) {
-    const record = ensureCharacterRecord(project, name) || {};
-    const $canvas = $("#character-canvas");
-    canvasActive = true;
-    $("#terminal").empty();
-    $("#terminal").addClass("hidden");
-    $canvas.addClass("visible").show();
-    try {
-      $canvas[0]?.scrollIntoView({ behavior: "smooth" });
-    } catch (_) {
-      // ignore scroll failures
-    }
-    setStatus(`Canvas mode: editing ${name}`);
-    $("#canvas-character-name").text(name);
-    renderCharacterGallery(record, name);
-    $("#canvas-document").val(record.sheet?.text || "");
-    $("#canvas-ext-select").val(record.sheet?.ext || "docx");
-    $("#canvas-chat-log").empty();
-    $("#canvas-user-prompt").val("");
-    appendCanvasMessage(
-      "system",
-      record.sheet?.text
-        ? "Loaded existing character sheet into the canvas. Ask for revisions or edit directly."
-        : "No saved sheet yet. Draft here or ask the assistant to create one."
-    );
-  }
-
-  function renderCharacterGallery(record, name) {
-    const photos = record?.photos || [];
-    const $track = $("#canvas-gallery-track");
-    const $prev = $("#canvas-gallery-prev");
-    const $next = $("#canvas-gallery-next");
-    $track.empty();
-
-    if (!photos.length) {
-      $track.append(
-        $("<div>")
-          .addClass("canvas-gallery-empty")
-          .text(`No images for ${name} yet. Add a profile or gallery photo to see it here.`)
-      );
-      $prev.prop("disabled", true);
-      $next.prop("disabled", true);
-      return;
-    }
-
-    photos.forEach((p) => {
-      const $thumb = $("<div>").addClass("canvas-thumb");
-      if (p.dataUrl) {
-        $thumb.append($("<img>").attr("src", p.dataUrl).attr("alt", p.filename || p.type || "photo"));
-      } else {
-        $thumb.text(p.filename || (p.type === "profile" ? "Profile" : "Photo"));
-      }
-      $thumb.append($("<div>").addClass("thumb-label").text(p.filename || p.type || "photo"));
-      $track.append($thumb);
-    });
-
-    updateGalleryNavButtons();
-  }
-
-  function updateGalleryNavButtons() {
-    const trackEl = document.getElementById("canvas-gallery-track");
-    const windowEl = document.getElementById("canvas-gallery-window");
-    const hasPhotos = trackEl && trackEl.children.length > 0 && !trackEl.querySelector(".canvas-gallery-empty");
-    if (!trackEl || !windowEl) return;
-    const maxScroll = Math.max(0, trackEl.scrollWidth - windowEl.clientWidth);
-    const current = trackEl.scrollLeft;
-    $("#canvas-gallery-prev").prop("disabled", !hasPhotos || current <= 1);
-    $("#canvas-gallery-next").prop("disabled", !hasPhotos || current >= maxScroll - 1);
-  }
-
-  function scrollGallery(delta) {
-    const trackEl = document.getElementById("canvas-gallery-track");
-    if (!trackEl) return;
-    trackEl.scrollBy({ left: delta, behavior: "smooth" });
-    setTimeout(updateGalleryNavButtons, 200);
-  }
-
-  function appendCanvasMessage(role, text) {
-    const $msg = $("<div>").addClass("canvas-msg");
-    $msg.append($("<div>").addClass("role").text(role.toUpperCase()));
-    $msg.append($("<div>").text(text));
-    $("#canvas-chat-log").append($msg);
-    $("#canvas-chat-log").scrollTop($("#canvas-chat-log")[0].scrollHeight);
-  }
-
-  async function sendCharacterCanvasPrompt(project) {
-    if (!canvasActive) return;
-    const name = currentCharacterName;
-    const promptText = $("#canvas-user-prompt").val().trim();
-    if (!name || !promptText) return;
-    const currentSheet = $("#canvas-document").val();
-    appendCanvasMessage("you", promptText);
-    $("#canvas-user-prompt").val("");
-    setStatus("Running CharacterDesigner for canvas...");
-    const combinedPrompt = `You are collaborating on an editable character sheet for ${name}.
-The current sheet content is:
-${currentSheet || "(none yet)"}
-
-User request:
-${promptText}
-
-Return the fully updated character sheet text only, ready to replace the document.`;
-    try {
-      const reply = await runProjectAssistant(project, "CharacterDesigner", combinedPrompt);
-      if (reply) {
-        $("#canvas-document").val(reply);
-        appendCanvasMessage("assistant", reply);
-      } else {
-        appendCanvasMessage("assistant", "No reply returned.");
-      }
-    } catch (e) {
-      appendCanvasMessage("assistant", "Error: " + e.message);
-      logLine("Canvas prompt error: " + e.message, true);
-    }
-    setStatus("Ready.");
-  }
-
-  async function saveCanvasCharacterSheet(project, options = {}) {
-    const name = currentCharacterName;
+  async function workOnCharacterSheet(project) {
+    const name = getActiveCharacterName(project);
     if (!name) {
-      alert("Select a character first.");
+      alert("Select or enter a character first.");
       return;
     }
     const record = ensureCharacterRecord(project, name);
-    const ext = $("#canvas-ext-select").val();
-    const text = options.textOverride || $("#canvas-document").val();
-    const filename = `${name} Character Sheet.${ext}`;
-    const vsId = await ensureVectorStore(project, "characters");
+    setCurrentCharacter(project, name);
 
-    let uploadFile = options.sourceFile || null;
-    if (!uploadFile) {
-      if (ext === "docx") {
-        const docxBlob = await generateDocxFromText(text);
-        uploadFile = new File([docxBlob], filename, {
-          type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        });
-      } else {
-        uploadFile = new File([text], filename, { type: "text/plain" });
-      }
+    const userGoal =
+      prompt(
+        `What should the assistant do for ${name}?`,
+        record?.sheet?.text ? "Tighten and expand the current sheet." : "Draft a new character sheet."
+      ) || "Draft or refine the character sheet.";
+
+    const extInput = (prompt("Save as txt or docx?", record?.sheet?.ext || "txt") || "txt").toLowerCase();
+    const ext = extInput === "docx" ? "docx" : "txt";
+
+    const promptText = `
+Update the character sheet for ${name}.
+File naming must follow "${name} Character Sheet.${ext}".
+
+Existing sheet (if any):
+${record?.sheet?.text || "(none yet)"}
+
+User request:
+${userGoal}
+
+Return the full updated sheet text ready to save.
+`.trim();
+
+    const newText = await runProjectAssistant(project, "CharacterDesigner", promptText);
+    if (!newText) {
+      logLine("No character sheet text returned.", true);
+      return;
     }
+
+    if (!confirm("Replace the stored character sheet with the assistant's version?")) {
+      return;
+    }
+
+    const vsId = await ensureVectorStore(project, "characters");
+    const filename = `${name} Character Sheet.${ext}`;
+    const blob = new Blob([newText], { type: "text/plain" });
+    const file = new File([blob], filename, { type: "text/plain" });
 
     if (record.sheet?.fileId) {
       try {
@@ -1488,50 +1271,27 @@ Return the fully updated character sheet text only, ready to replace the documen
       }
     }
 
-    const uploadRes = await uploadFileToOpenAI(uploadFile);
+    const uploadRes = await uploadFileToOpenAI(file);
     await attachFileToVectorStore(vsId, uploadRes.id);
+
     record.sheet = {
       fileId: uploadRes.id,
       filename,
       ext,
-      text,
+      text: newText,
     };
+
     saveProjectsToStorage();
     logLine(`Saved character sheet for ${name}: ${filename} (fileId: ${uploadRes.id})`);
-    appendCanvasMessage("system", `Saved and attached ${filename}.`);
-  }
 
-  async function downloadCharacterSheetDocx(name, text) {
-    const blob = await generateDocxFromText(text || "");
-    const filename = `${name} Character Sheet.docx`;
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
-  async function replaceCharacterSheetFromUpload(project, file) {
-    if (!file) return;
-    const name = currentCharacterName;
-    const text = await extractDocxText(file);
-    $("#canvas-document").val(text);
-    $("#canvas-ext-select").val("docx");
-    await saveCanvasCharacterSheet(project, { sourceFile: file, textOverride: text });
-    appendCanvasMessage("system", `${file.name} uploaded and applied to the sheet.`);
-  }
-
-  async function workOnCharacterSheet(project) {
-    const name = getActiveCharacterName(project);
-    if (!name) {
-      alert("Select or enter a character first.");
-      return;
-    }
-    ensureCharacterRecord(project, name);
-    setCurrentCharacter(project, name);
-    showCharacterCanvas(project, name);
-    logLine(`Opened canvas for ${name}.`);
+    const dlUrl = URL.createObjectURL(blob);
+    const $link = $("<a>")
+      .addClass("download-link")
+      .attr("href", dlUrl)
+      .attr("download", filename)
+      .text(`Download ${filename}`);
+    logLine("Click to download character sheet: ");
+    $("#terminal").append($link).append("<br/>");
   }
 
   function describeCharacterPhotos(record) {
@@ -1632,10 +1392,6 @@ Return the fully updated character sheet text only, ready to replace the documen
     saveProjectsToStorage();
     logLine(`Saved ${isProfile ? "profile" : "gallery"} image for ${name}: ${filename} (fileId: ${uploadRes.id})`);
     if (fileInput) fileInput.value = "";
-
-    if (canvasActive && currentCharacterName === name) {
-      renderCharacterGallery(record, name);
-    }
   }
 
   // ==============================
@@ -2297,28 +2053,10 @@ Please:
       logLine("No files available to remove.", true);
       return;
     }
-    let choice = null;
-    if (typeof showSelectModal === "function") {
-      choice = await showSelectModal(
-        `Remove file from ${category}`,
-        files.map((f) => ({ value: f.id, label: `${f.filename} (${f.status})` }))
-      );
-    } else {
-      logLine(
-        "Selection modal unavailable; falling back to prompt-based selection.",
-        true
-      );
-      const labelList = files
-        .map((f, idx) => `${idx + 1}. ${f.filename} (${f.status})`)
-        .join("\n");
-      const raw = prompt(
-        `Select a file number to remove from ${category}:\n${labelList}`
-      );
-      const index = raw ? parseInt(raw, 10) - 1 : -1;
-      if (index >= 0 && index < files.length) {
-        choice = files[index].id;
-      }
-    }
+    const choice = await showSelectModal(
+      `Remove file from ${category}`,
+      files.map((f) => ({ value: f.id, label: `${f.filename} (${f.status})` }))
+    );
     if (!choice) return;
     const fileId = choice;
     try {
@@ -2464,16 +2202,6 @@ Please:
       } catch (e) {
         logLine("Error updating character photos: " + e.message, true);
       }
-    });
-
-    $("#canvas-gallery-prev").on("click", function () {
-      scrollGallery(-180);
-    });
-    $("#canvas-gallery-next").on("click", function () {
-      scrollGallery(180);
-    });
-    $("#canvas-gallery-track").on("scroll", function () {
-      updateGalleryNavButtons();
     });
 
     $("#init-assistants-btn").on("click", async function () {
