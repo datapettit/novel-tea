@@ -114,6 +114,17 @@
       overflow: hidden;
       gap: 8px;
     }
+    #doc-canvas {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      background: #0b0c10;
+      border-bottom: 1px solid #1f2833;
+      padding: 10px;
+      box-sizing: border-box;
+      gap: 10px;
+      overflow: hidden;
+    }
     #canvas-gallery {
       display: flex;
       align-items: center;
@@ -270,6 +281,9 @@
     }
     #canvas-upload-input {
       display: none;
+    }
+    #doc-canvas.visible {
+      display: flex;
     }
     .modal-backdrop {
       position: fixed;
@@ -486,6 +500,157 @@
     #console-log .line.error {
       color: #ff6b6b;
     }
+    .character-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .character-card {
+      border: 1px solid #1f2833;
+      border-radius: 6px;
+      background: linear-gradient(135deg, #0f111a, #151c29);
+      height: 130px;
+      position: relative;
+      cursor: pointer;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #c5c6c7;
+      transition: border-color 0.2s ease, transform 0.2s ease;
+    }
+    .character-card:hover {
+      border-color: #45a29e;
+      transform: translateY(-2px);
+    }
+    .character-card.selected {
+      border-color: #66fcf1;
+      box-shadow: 0 0 0 2px rgba(102, 252, 241, 0.25);
+    }
+    .character-card .card-image {
+      position: absolute;
+      inset: 0;
+      background-size: cover;
+      background-position: center;
+      opacity: 0.6;
+      filter: blur(0px) saturate(1.1);
+    }
+    .character-card .card-overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.55));
+    }
+    .character-card .card-name {
+      position: relative;
+      text-align: center;
+      font-weight: bold;
+      z-index: 2;
+      padding: 0 6px;
+    }
+    .character-card .card-add-icon {
+      font-size: 36px;
+      line-height: 1;
+      color: #66fcf1;
+      z-index: 2;
+    }
+    .character-card.new-card {
+      border-style: dashed;
+      border-color: #45a29e;
+      background: #0d1117;
+      color: #66fcf1;
+    }
+    .character-card.new-card:hover {
+      border-color: #66fcf1;
+      background: #101724;
+    }
+    .character-grid-empty {
+      grid-column: 1 / -1;
+      text-align: center;
+      color: #7b848f;
+      font-size: 12px;
+      padding: 10px 0;
+    }
+    .character-grid-hint {
+      font-size: 11px;
+      color: #c5c6c7;
+      margin-top: 6px;
+    }
+    .doc-list {
+      border: 1px solid #1f2833;
+      border-radius: 6px;
+      background: #0d1117;
+      overflow-y: auto;
+      max-height: 380px;
+      font-size: 12px;
+    }
+    .doc-row {
+      display: grid;
+      grid-template-columns: 2fr 1fr 0.7fr 120px;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 10px;
+      border-bottom: 1px solid #151a24;
+    }
+    .doc-row:last-child {
+      border-bottom: none;
+    }
+    .doc-row-header {
+      font-weight: bold;
+      color: #c5c6c7;
+      background: #101724;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .doc-row .doc-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+    .doc-row button {
+      margin-top: 0;
+      padding: 4px 8px;
+      font-size: 12px;
+    }
+    #doc-preview {
+      border: 1px solid #1f2833;
+      border-radius: 6px;
+      background: #0d1117;
+      padding: 10px;
+      min-height: 160px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    #doc-preview img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
+    #doc-canvas-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    #doc-canvas-header .title {
+      font-weight: bold;
+      font-size: 14px;
+      color: #66fcf1;
+    }
+    #doc-canvas-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .modal-error {
+      color: #ff6b6b;
+      font-size: 11px;
+      margin-top: 6px;
+    }
   </style>
 </head>
 <body>
@@ -523,7 +688,7 @@
 
     <div class="section-title" style="margin-top:14px;">Workspace Menus</div>
 
-    <details class="menu-panel" open>
+    <details class="menu-panel" id="setup-docs-panel" open>
       <summary>Setup & Docs</summary>
       <div class="menu-body">
         <div class="menu-subgroup">
@@ -558,19 +723,14 @@
       </div>
     </details>
 
-    <details class="menu-panel" open>
+    <details class="menu-panel" id="character-panel" open>
       <summary>Character Development</summary>
       <div class="menu-body">
         <div class="menu-subgroup">
           <div class="menu-subtitle">Roster</div>
           <button id="refresh-characters-btn">Refresh Character Roster</button>
-          <div id="character-roster-list" class="roster-list">(no character files yet)</div>
-          <div style="margin-top:6px;font-size:11px;">Select or add a character:</div>
-          <select id="character-select">
-            <option value="">(none selected)</option>
-          </select>
-          <input type="text" id="character-name-input" placeholder="Character name" style="margin-top:4px;" />
-          <button id="set-character-btn">Select / Create Character</button>
+          <div id="character-grid" class="character-grid"></div>
+          <div class="character-grid-hint">Click a profile to open its canvas. Use the + card to add a new character.</div>
           <div style="margin-top:6px;font-size:11px;">Current: <span id="current-character-name">None</span></div>
         </div>
         <div class="menu-subgroup">
@@ -642,6 +802,18 @@
   </div>
 
   <div id="main">
+    <div id="doc-canvas">
+      <div id="doc-canvas-header">
+        <div class="title">Document Explorer: <span id="doc-canvas-category">characters</span></div>
+        <div id="doc-canvas-actions">
+          <button id="doc-add-btn">Add document(s)</button>
+          <button id="doc-refresh-btn">Refresh List</button>
+        </div>
+      </div>
+      <div class="doc-list" id="doc-list"></div>
+      <div id="doc-preview">Select a document to preview its contents here.</div>
+      <input type="file" id="doc-canvas-upload" multiple style="display:none;" />
+    </div>
     <div id="character-canvas">
       <div id="canvas-gallery">
         <button id="canvas-gallery-prev" class="gallery-nav">&#8249;</button>
@@ -887,18 +1059,19 @@
     return project.characters[cleanName];
   }
 
-  function refreshCharacterSelectUI(project) {
-    const $sel = $("#character-select");
-    $sel.empty();
-    $sel.append($("<option>").val("").text("(none selected)"));
-    const names = Object.keys(project?.characters || {}).sort((a, b) => b.localeCompare(a));
-    names.forEach((name) => {
-      const opt = $("<option>").val(name).text(name);
+  function highlightSelectedCharacterCard() {
+    const $cards = $("#character-grid .character-card");
+    $cards.removeClass("selected");
+    if (!currentCharacterName) return;
+    $cards.each(function () {
+      const name = $(this).data("name");
       if (name === currentCharacterName) {
-        opt.attr("selected", "selected");
+        $(this).addClass("selected");
       }
-      $sel.append(opt);
     });
+  }
+
+  function refreshCharacterSelectUI(project) {
     $("#current-character-name").text(currentCharacterName || "None");
   }
 
@@ -914,6 +1087,7 @@
     currentCharacterName = cleanName;
     saveProjectsToStorage();
     refreshCharacterSelectUI(project);
+    highlightSelectedCharacterCard();
     logLine("Working on character: " + cleanName);
   }
 
@@ -925,6 +1099,9 @@
     currentProjectName = name;
     $("#current-project-name").text(name);
     currentCharacterName = null;
+    resetCharacterCanvasSession();
+    hideCharacterCanvas();
+    ensureDocPreviewMessage();
     refreshCharacterSelectUI(projects[name]);
     refreshCharacterRoster(projects[name], true).catch((e) => {
       logLine("Could not refresh character roster: " + e.message, true);
@@ -932,6 +1109,10 @@
     refreshStoryTargetSelectors(projects[name], true);
     logLine("Switched to project: " + name);
     setStatus("Project " + name + " loaded.");
+    showDocCanvas(projects[name], $("#doc-category-select").val());
+    initAssistantsForProject(projects[name]).catch((e) => {
+      logLine("Auto-initialize assistants failed: " + e.message, true);
+    });
   }
 
   function getCurrentProject() {
@@ -1015,6 +1196,39 @@
     }
     // Expect binary audio
     return await res.blob();
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function fetchOpenAIFileContent(fileId) {
+    if (!requireApiKey()) throw new Error("No API key");
+    const headers = {
+      Authorization: "Bearer " + apiKey,
+    };
+    const res = await fetchWithTimeout(
+      `https://api.openai.com/v1/files/${fileId}/content`,
+      { method: "GET", headers },
+      `download file ${fileId}`
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error("OpenAI file download error (" + res.status + "): " + text);
+    }
+    const contentType = res.headers.get("content-type") || "";
+    const blob = await res.blob();
+    if (contentType.startsWith("image/")) {
+      const dataUrl = await blobToDataUrl(blob);
+      return { type: "image", data: dataUrl, contentType, blob };
+    }
+    const text = await blob.text();
+    return { type: "text", data: text, contentType, blob };
   }
 
   async function editImageWithPrompt(baseFile, promptText) {
@@ -1160,27 +1374,58 @@
 
   async function createOrGetAssistant(project, roleName, instructions, useFileSearch) {
     project.assistants = project.assistants || {};
-    if (project.assistants[roleName]) {
-      return project.assistants[roleName];
-    }
-    const tools = [];
+    const expectedTools = [];
     let toolResources = undefined;
     if (useFileSearch) {
       const vsIds = Object.values(project.vectorStores || {});
-      tools.push({ type: "file_search" });
-      if (vsIds.length > 0) {
-        toolResources = {
-          file_search: {
-            vector_store_ids: vsIds,
-          },
-        };
+      expectedTools.push({ type: "file_search" });
+      toolResources = {
+        file_search: {
+          vector_store_ids: vsIds,
+        },
+      };
+    }
+
+    const existingId = project.assistants[roleName];
+    if (existingId) {
+      try {
+        const assistant = await openaiJson(`/assistants/${existingId}`, "GET", null, true);
+        const existingTools = (assistant.tools || []).map((t) => t.type).sort().join(",");
+        const expectedToolTypes = expectedTools.map((t) => t.type).sort().join(",");
+        const existingVs = assistant.tool_resources?.file_search?.vector_store_ids || [];
+        const expectedVs = toolResources?.file_search?.vector_store_ids || [];
+
+        const needsUpdate =
+          (assistant.instructions || "").trim() !== instructions.trim() ||
+          assistant.model !== assistantModel ||
+          existingTools !== expectedToolTypes ||
+          JSON.stringify([...existingVs].sort()) !== JSON.stringify([...expectedVs].sort());
+
+        if (needsUpdate) {
+          const updateBody = {
+            instructions: instructions,
+            model: assistantModel,
+            tools: expectedTools,
+          };
+          if (toolResources) {
+            updateBody.tool_resources = toolResources;
+          }
+          await openaiJson(`/assistants/${existingId}`, "POST", updateBody, true, `update assistant ${roleName}`);
+          logLine(`Updated assistant '${roleName}' configuration.`);
+        } else {
+          logLine(`Assistant '${roleName}' already configured.`);
+        }
+        return existingId;
+      } catch (e) {
+        logLine(`Assistant '${roleName}' lookup failed; recreating. Error: ${e.message}`, true);
       }
     }
+
     const body = {
       name: project.name + " [" + roleName + "]",
       instructions: instructions,
       model: assistantModel,
-      tools: tools,
+      tools: expectedTools,
     };
     if (toolResources) {
       body.tool_resources = toolResources;
@@ -1441,10 +1686,6 @@ When asked about photos:
   // ==============================
 
   function getActiveCharacterName(project) {
-    const selected = $("#character-select").val();
-    const typed = $("#character-name-input").val().trim();
-    if (typed) return typed;
-    if (selected) return selected;
     if (currentCharacterName) return currentCharacterName;
     const names = Object.keys(project?.characters || {});
     return names[0] || null;
@@ -1452,31 +1693,58 @@ When asked about photos:
 
   function deriveCharacterNameFromFilename(filename) {
     if (!filename) return null;
-    const noExt = filename.replace(/\.[^/.]+$/, "");
-    const cleaned = noExt.replace(/character\s*sheet/i, "");
-    const words = cleaned.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+    const sheetMatch = filename.match(/^(.*)character\s*sheet/i);
+    if (!sheetMatch) return null;
+    const base = sheetMatch[1] || "";
+    const words = base.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
     return words || null;
   }
 
-  function renderCharacterRoster(roster) {
-    const $list = $("#character-roster-list");
-    $list.empty();
-    if (!roster.length) {
-      $list.text("(no character files yet)");
-      return;
+  function renderCharacterRoster(project, roster) {
+    const $grid = $("#character-grid");
+    $grid.empty();
+
+    const sorted = (roster || []).sort((a, b) => a.name.localeCompare(b.name));
+    if (!sorted.length) {
+      $grid.append($("<div>").addClass("character-grid-empty").text("(no character sheets found yet)"));
     }
-    roster
-      .sort((a, b) => b.name.localeCompare(a.name))
-      .forEach((entry) => {
-        const label = entry.filename ? `${entry.name} — ${entry.filename}` : entry.name;
-        $list.append($("<div>").addClass("roster-row").text(label));
+
+    sorted.forEach((entry) => {
+      const record = ensureCharacterRecord(project, entry.name);
+      const profile = (record?.photos || []).find((p) => p.type === "profile");
+      const $card = $("<div>").addClass("character-card").attr("data-name", entry.name);
+      if (profile?.dataUrl) {
+        $card.append($("<div>").addClass("card-image").css("background-image", `url(${profile.dataUrl})`));
+      }
+      $card.append($("<div>").addClass("card-overlay"));
+      $card.append($("<div>").addClass("card-name").text(entry.name));
+      if (currentCharacterName === entry.name) {
+        $card.addClass("selected");
+      }
+      $card.on("click", async () => {
+        const projectRef = getCurrentProject();
+        if (!projectRef) return;
+        await startCharacterCanvasSession(projectRef, entry.name);
       });
+      $grid.append($card);
+    });
+
+    const $newCard = $("<div>").addClass("character-card new-card");
+    $newCard.append($("<div>").addClass("card-add-icon").text("+"));
+    $newCard.on("click", () => {
+      const projectRef = getCurrentProject();
+      if (!projectRef) return;
+      showNewCharacterModal(projectRef);
+    });
+    $grid.append($newCard);
+
+    highlightSelectedCharacterCard();
   }
 
   async function refreshCharacterRoster(project, silent = false) {
     const vsId = project.vectorStores && project.vectorStores["characters"];
     if (!vsId) {
-      renderCharacterRoster([]);
+      renderCharacterRoster(project, []);
       if (!silent) {
         logLine("No character vector store yet. Upload or save a character sheet to create one.");
       }
@@ -1503,13 +1771,94 @@ When asked about photos:
       record.sheet.ext = record.sheet.ext || (filename.split(".").pop() || "txt").toLowerCase();
     }
 
-    renderCharacterRoster(roster);
+    renderCharacterRoster(project, roster);
     saveProjectsToStorage();
     refreshCharacterSelectUI(project);
     if (!silent) {
       logLine(`Character roster refreshed from file names (${roster.length} found).`);
     }
     return roster;
+  }
+
+  function resetCharacterCanvasSession() {
+    $("#canvas-chat-log").empty();
+    $("#canvas-user-prompt").val("");
+    setCanvasText("");
+  }
+
+  function hideCharacterCanvas() {
+    $("#character-canvas").removeClass("visible");
+  }
+
+  async function loadCharacterAssets(project, name) {
+    const matches = [];
+    const storeEntries = Object.entries(project.vectorStores || {});
+    const seen = new Set();
+
+    for (const [category, vsId] of storeEntries) {
+      if (!vsId) continue;
+      let files = [];
+      try {
+        const res = await listVectorStoreFiles(vsId);
+        files = res.data || [];
+      } catch (e) {
+        logLine(`Failed to list files for ${category}: ${e.message}`, true);
+        continue;
+      }
+
+      for (const item of files) {
+        if (seen.has(item.id)) continue;
+        seen.add(item.id);
+        let filename = item.id;
+        try {
+          const meta = await retrieveOpenAIFile(item.id);
+          filename = meta.filename || filename;
+        } catch (e) {
+          // ignore metadata fetch failures
+        }
+        if (!filename || !filename.toLowerCase().includes(name.toLowerCase())) continue;
+        matches.push({ filename, fileId: item.id });
+      }
+    }
+
+    const record = ensureCharacterRecord(project, name);
+    for (const match of matches) {
+      try {
+        if (/character\s*sheet/i.test(match.filename) && !record?.sheet?.text) {
+          const content = await fetchOpenAIFileContent(match.fileId);
+          if (content.type === "text") {
+            const ext = (match.filename.split(".").pop() || "txt").toLowerCase();
+            record.sheet = {
+              ...(record.sheet || {}),
+              text: content.data,
+              fileId: match.fileId,
+              filename: match.filename,
+              ext,
+            };
+          }
+        }
+        if (/profile\.(jpg|jpeg|png)$/i.test(match.filename)) {
+          const hasProfile = (record?.photos || []).some((p) => p.type === "profile");
+          if (!hasProfile) {
+            const content = await fetchOpenAIFileContent(match.fileId);
+            if (content.type === "image") {
+              record.photos = record.photos || [];
+              record.photos.unshift({
+                fileId: match.fileId,
+                filename: match.filename,
+                type: "profile",
+                dataUrl: content.data,
+              });
+            }
+          }
+        }
+      } catch (e) {
+        logLine(`Unable to load attachment ${match.filename}: ${e.message}`, true);
+      }
+    }
+
+    saveProjectsToStorage();
+    return matches;
   }
 
   function getCanvasText() {
@@ -1553,18 +1902,105 @@ When asked about photos:
     refreshPhotoTargetSelect(record);
   }
 
-  function openCharacterCanvas(name, record) {
+  function openCharacterCanvas(name, record, sheetText = null) {
     $("#canvas-character-name").text(name || "None");
+    hideDocCanvas();
     $("#character-canvas").addClass("visible");
     if (record?.sheet?.ext) {
       $("#canvas-ext-select").val(record.sheet.ext);
     }
-    if (record?.sheet?.text) {
-      setCanvasText(record.sheet.text);
+    const textToUse = sheetText || record?.sheet?.text;
+    if (textToUse) {
+      setCanvasText(textToUse);
     } else if (!getCanvasText()) {
       setCanvasText("Character sheet will appear here for collaborative editing...");
     }
     renderCharacterGallery(record || {});
+  }
+
+  async function startCharacterCanvasSession(project, name) {
+    if (!name) return;
+    const switching = currentCharacterName && currentCharacterName !== name;
+    if (!currentCharacterName || switching) {
+      resetCharacterCanvasSession();
+    }
+
+    setCurrentCharacter(project, name);
+    const record = ensureCharacterRecord(project, name);
+    const attachments = await loadCharacterAssets(project, name);
+    openCharacterCanvas(name, record, record?.sheet?.text || "");
+    if (!record?.sheet?.text) {
+      setCanvasText("Character sheet will appear here for collaborative editing...");
+    }
+    if (attachments.length) {
+      pushCanvasMessage(
+        "system",
+        `Loaded ${attachments.length} attachment(s) mentioning ${name}. Canvas is fresh and ready.`
+      );
+    } else {
+      pushCanvasMessage(
+        "system",
+        "No name-matched attachments found yet. Add character documents or images to deepen context."
+      );
+    }
+  }
+
+  function buildInitialCharacterSheet(name, profileText) {
+    return `${name} — Character Sheet\n\nFacts (name, age, race, class, family, origin, skills, etc.):\n${profileText}\n\nOrigin / Backstory:\n- Detail their history and formative events.\n\nRelevance to Story:\n- List current goals, conflicts, and ties to the plot.`;
+  }
+
+  async function createCharacterFromModal(project, name, profileText) {
+    const record = ensureCharacterRecord(project, name);
+    const seedSheet = buildInitialCharacterSheet(name, profileText);
+    record.sheet = {
+      text: seedSheet,
+      ext: "txt",
+    };
+    setCurrentCharacter(project, name);
+    await persistCharacterSheet(project, record, name, seedSheet, "txt");
+    await startCharacterCanvasSession(project, name);
+  }
+
+  function showNewCharacterModal(project) {
+    const $backdrop = $("<div>").addClass("modal-backdrop");
+    const $box = $("<div>").addClass("modal-box");
+    $box.append($("<h4>").text("New Character"));
+    const $nameInput = $("<input>")
+      .attr("type", "text")
+      .attr("placeholder", "Character name")
+      .css("width", "100%");
+    const $profileText = $("<textarea>")
+      .attr("rows", 6)
+      .attr("placeholder", "Profile details to seed the character sheet")
+      .css({ width: "100%", marginTop: "6px" });
+    const $error = $("<div>").addClass("modal-error").hide();
+    const $actions = $("<div>").addClass("modal-actions");
+    const $cancel = $("<button>").text("Cancel");
+    const $create = $("<button>").text("Create").css("background", "#45a29e");
+
+    $cancel.on("click", () => $backdrop.remove());
+    $create.on("click", async () => {
+      const name = ($nameInput.val() || "").trim();
+      const profile = ($profileText.val() || "").trim();
+      if (!name || !profile) {
+        $error.text("Name and profile are required.").show();
+        return;
+      }
+      $error.hide();
+      $backdrop.remove();
+      await createCharacterFromModal(project, name, profile);
+    });
+
+    $actions.append($cancel, $create);
+    $box.append($nameInput, $profileText, $error, $actions);
+    $backdrop.append($box);
+    $backdrop.on("click", (e) => {
+      if (e.target === $backdrop[0]) {
+        $backdrop.remove();
+      }
+    });
+    $("body").append($backdrop);
+    $nameInput.focus();
   }
 
   async function persistCharacterSheet(project, record, name, text, ext) {
@@ -1611,16 +2047,31 @@ When asked about photos:
     URL.revokeObjectURL(url);
   }
 
+  async function buildStorySourceSummary(project) {
+    const categories = ["storyline", "outlines", "relationships"];
+    const lines = [];
+    for (const cat of categories) {
+      const docs = await fetchCategoryDocuments(project, cat);
+      const names = docs.map((d) => d.filename);
+      lines.push(`${cat}: ${names.length ? names.join(", ") : "(no files found)"}`);
+    }
+    return lines.join("\n");
+  }
+
   async function scanForOtherCharacters(project) {
     const known = Object.keys(project.characters || {});
+    const storySources = await buildStorySourceSummary(project);
     const prompt = `
-Scan all available story materials using file_search and identify named characters
-who appear important but do NOT have a character sheet yet.
+Use file_search to deeply read the storyline, outlines, and relationships document categories. Identify named characters who are
+important to the narrative but do NOT have a character sheet yet.
 
 Current character sheets: ${known.length ? known.join(", ") : "(none)"}
 
-Return a short bullet list with: character name, why they matter, and a suggested
-"[Name] Character Sheet.txt" title if we should create one.
+Story sources available (do NOT ask the user for uploads; work with what exists):
+${storySources}
+
+Return a concise bullet list with: character name, why they matter, and a suggested "[Name] Character Sheet.txt" title if we
+should create one. If a category lacks files, continue using any other context available.
 `.trim();
 
     const text = await runProjectAssistant(project, "LoreKeeper", prompt);
@@ -1635,55 +2086,10 @@ Return a short bullet list with: character name, why they matter, and a suggeste
     await refreshCharacterRoster(project, true);
     const name = getActiveCharacterName(project);
     if (!name) {
-      alert("Select or enter a character first.");
+      alert("Select or create a character first.");
       return;
     }
-    const record = ensureCharacterRecord(project, name);
-    setCurrentCharacter(project, name);
-    openCharacterCanvas(name, record);
-    if (record.sheet?.text) {
-      setCanvasText(record.sheet.text);
-    }
-    const currentExt = record.sheet?.ext || $("#canvas-ext-select").val() || "txt";
-    $("#canvas-ext-select").val(currentExt);
-    const existingSheet = getCanvasText() || record.sheet?.text || "";
-
-    const userGoal =
-      prompt(
-        `What should the assistant do for ${name}?`,
-        record?.sheet?.text ? "Tighten and expand the current sheet." : "Draft a new character sheet."
-      ) || "Draft or refine the character sheet.";
-
-    pushCanvasMessage("user", userGoal);
-
-    const extInput = (prompt("Save as txt or docx?", currentExt) || "txt").toLowerCase();
-    const ext = extInput === "docx" ? "docx" : "txt";
-
-    const promptText = `
-Update the character sheet for ${name}.
-File naming must follow "${name} Character Sheet.${ext}".
-
-Existing sheet (if any):
-${existingSheet || "(none yet)"}
-
-User request:
-${userGoal}
-
-Return the full updated sheet text ready to save.
-`.trim();
-
-    const newText = await runProjectAssistant(project, "CharacterDesigner", promptText);
-    if (!newText) {
-      logLine("No character sheet text returned.", true);
-      return;
-    }
-
-    record.sheet = record.sheet || {};
-    record.sheet.ext = ext;
-    record.sheet.text = newText;
-    setCanvasText(newText);
-    pushCanvasMessage("assistant", newText);
-    await persistCharacterSheet(project, record, name, newText, ext);
+    await startCharacterCanvasSession(project, name);
   }
 
   async function sendCharacterCanvasPrompt(project) {
@@ -2463,8 +2869,14 @@ Please:
       logLine("No files selected for upload.", true);
       return;
     }
+    await uploadDocumentsToCategory(project, category, files);
+    await renderDocExplorer(project, category);
+    $("#file-upload-input").val("");
+  }
+
+  async function uploadDocumentsToCategory(project, category, fileList) {
     const vsId = await ensureVectorStore(project, category);
-    for (const file of files) {
+    for (const file of fileList) {
       try {
         logLine(`Uploading file "${file.name}" for category "${category}"...`);
         const fileRes = await uploadFileToOpenAI(file);
@@ -2474,7 +2886,6 @@ Please:
         logLine("Error uploading file: " + e.message, true);
       }
     }
-    $("#file-upload-input").val("");
   }
 
   async function listFilesInCategory(project) {
@@ -2554,8 +2965,138 @@ Please:
         await deleteOpenAIFile(fileId);
         logLine("Deleted file from OpenAI: " + fileId);
       }
+      await renderDocExplorer(project, category);
     } catch (e) {
       logLine("Error removing file: " + e.message, true);
+    }
+  }
+
+  function showDocCanvas(project, category) {
+    if (!project) return;
+    const cat = category || $("#doc-category-select").val() || "characters";
+    $("#doc-canvas-category").text(cat);
+    $("#doc-canvas").addClass("visible");
+    hideCharacterCanvas();
+    renderDocExplorer(project, cat).catch((e) => logLine("Error rendering docs: " + e.message, true));
+  }
+
+  function hideDocCanvas() {
+    $("#doc-canvas").removeClass("visible");
+  }
+
+  function ensureDocPreviewMessage(msg) {
+    $("#doc-preview").empty().text(msg || "Select a document to preview its contents here.");
+  }
+
+  async function fetchCategoryDocuments(project, category) {
+    const vsId = project.vectorStores && project.vectorStores[category];
+    if (!vsId) return [];
+    const res = await listVectorStoreFiles(vsId);
+    const docs = [];
+    for (const item of res.data || []) {
+      let meta = {};
+      try {
+        meta = await retrieveOpenAIFile(item.id);
+      } catch (e) {
+        // continue with minimal info
+      }
+      const filename = meta.filename || item.id;
+      const createdAt = meta.created_at ? new Date(meta.created_at * 1000) : null;
+      docs.push({
+        id: item.id,
+        filename,
+        status: item.status,
+        bytes: meta.bytes || 0,
+        createdAt,
+      });
+    }
+    return docs;
+  }
+
+  async function renderDocExplorer(project, category) {
+    const $list = $("#doc-list");
+    $list.empty();
+    const docs = await fetchCategoryDocuments(project, category);
+
+    const $header = $("<div>").addClass("doc-row doc-row-header");
+    $header.append($("<div>").text("Name"));
+    $header.append($("<div>").text("Date"));
+    $header.append($("<div>").text("Size (KB)"));
+    $header.append($("<div>").text("Actions"));
+    $list.append($header);
+
+    if (!docs.length) {
+      $list.append(
+        $("<div>")
+          .addClass("doc-row")
+          .append($("<div>").css("grid-column", "1 / -1").text("No documents found for this category yet."))
+      );
+      ensureDocPreviewMessage("Select a category or add new documents to preview them here.");
+      return;
+    }
+
+    docs.forEach((doc) => {
+      const $row = $("<div>").addClass("doc-row");
+      $row.append($("<div>").text(doc.filename));
+      const dateText = doc.createdAt ? doc.createdAt.toLocaleString() : "Unknown";
+      $row.append($("<div>").text(dateText));
+      const kb = doc.bytes ? (doc.bytes / 1024).toFixed(1) : "-";
+      $row.append($("<div>").text(kb));
+      const $actions = $("<div>").addClass("doc-actions");
+      const $view = $("<button>").text("🔍 View");
+      const $delete = $("<button>").text("🗑️ Delete");
+
+      $view.on("click", async () => {
+        try {
+          await previewDocument(project, doc);
+        } catch (e) {
+          logLine("Error previewing document: " + e.message, true);
+        }
+      });
+
+      $delete.on("click", async () => {
+        const confirmDelete = confirm(`Delete ${doc.filename} from ${category}? This removes it from OpenAI storage.`);
+        if (!confirmDelete) return;
+        const vsId = project.vectorStores && project.vectorStores[category];
+        try {
+          if (vsId) {
+            await deleteVectorStoreFile(vsId, doc.id);
+          }
+          await deleteOpenAIFile(doc.id);
+          logLine(`Deleted ${doc.filename} (${doc.id}).`);
+          await renderDocExplorer(project, category);
+        } catch (e) {
+          logLine("Error deleting document: " + e.message, true);
+        }
+      });
+
+      $actions.append($view, $delete);
+      $row.append($actions);
+      $list.append($row);
+    });
+  }
+
+  async function previewDocument(project, doc) {
+    const content = await fetchOpenAIFileContent(doc.id);
+    const $preview = $("#doc-preview");
+    $preview.empty();
+    if (content.type === "text") {
+      $preview.text(content.data || "(no text)");
+      return;
+    }
+    if (content.type === "image") {
+      $preview.append($("<img>").attr("src", content.data));
+      return;
+    }
+
+    const blob = content.blob;
+    if (blob) {
+      const url = URL.createObjectURL(blob);
+      const $link = $("<a>").addClass("download-link").attr("href", url).attr("download", doc.filename).text("Download file");
+      $preview.append($("<div>").text("Preview unavailable. Download instead:"));
+      $preview.append($link);
+    } else {
+      $preview.text("Preview unavailable for this file type.");
     }
   }
 
@@ -2577,6 +3118,8 @@ Please:
     logLine("API key preloaded for testing. Replace or clear as needed.");
     logLine("Novel Studio HTML client loaded.");
     setStatus("Ready.");
+    ensureDocPreviewMessage();
+    showDocCanvas(initialProject, $("#doc-category-select").val());
 
     $("#model-select").on("change", function () {
       const model = $(this).val();
@@ -2590,6 +3133,70 @@ Please:
     $("#console-toggle-btn").on("click", function (e) {
       e.stopPropagation();
       setConsoleExpanded(!consoleExpanded);
+    });
+
+    $("#doc-category-select").on("change", function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      showDocCanvas(project, $(this).val());
+    });
+
+    $("#doc-add-btn").on("click", function () {
+      $("#doc-canvas-upload").click();
+    });
+
+    $("#doc-refresh-btn").on("click", function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      showDocCanvas(project, $("#doc-category-select").val());
+    });
+
+    $("#doc-canvas-upload").on("change", async function (e) {
+      const project = getCurrentProject();
+      if (!project) return;
+      const files = e.target.files || [];
+      const category = $("#doc-category-select").val();
+      if (!files.length) return;
+      try {
+        await uploadDocumentsToCategory(project, category, files);
+        await renderDocExplorer(project, category);
+        ensureDocPreviewMessage();
+      } catch (err) {
+        logLine("Error uploading documents: " + err.message, true);
+      } finally {
+        $(this).val("");
+      }
+    });
+
+    $("#setup-docs-panel").on("toggle", function () {
+      const project = getCurrentProject();
+      if (this.open) {
+        if (project) {
+          showDocCanvas(project, $("#doc-category-select").val());
+        }
+      } else {
+        hideDocCanvas();
+        const charPanel = document.getElementById("character-panel");
+        const charOpen = charPanel ? charPanel.open : false;
+        const activeName = project ? currentCharacterName || getActiveCharacterName(project) : null;
+        if (charOpen && project && activeName) {
+          openCharacterCanvas(activeName, ensureCharacterRecord(project, activeName));
+        }
+      }
+    });
+
+    $("#character-panel").on("toggle", function () {
+      if (this.open) {
+        hideDocCanvas();
+        const project = getCurrentProject();
+        const name = currentCharacterName || getActiveCharacterName(project || {});
+        if (project && name) {
+          openCharacterCanvas(name, ensureCharacterRecord(project, name));
+        }
+      } else {
+        hideCharacterCanvas();
+        resetCharacterCanvasSession();
+      }
     });
 
     $("#canvas-gallery-prev").on("click", function () {
@@ -2650,28 +3257,6 @@ Please:
       refreshProjectListUI();
       refreshCharacterSelectUI({ characters: {} });
       logLine("Deleted project (local only).");
-    });
-
-    $("#character-select").on("change", function () {
-      const project = getCurrentProject();
-      if (!project) return;
-      const name = $(this).val();
-      setCurrentCharacter(project, name);
-    });
-
-    $("#set-character-btn").on("click", function () {
-      const project = getCurrentProject();
-      if (!project) return;
-      const typed = $("#character-name-input").val().trim();
-      const selected = $("#character-select").val();
-      const name = typed || selected;
-      if (!name) {
-        alert("Enter a character name first.");
-        return;
-      }
-      ensureCharacterRecord(project, name);
-      saveProjectsToStorage();
-      setCurrentCharacter(project, name);
     });
 
     $("#refresh-characters-btn").on("click", async function () {
