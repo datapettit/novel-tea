@@ -3,10 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <title>Novel Studio – OpenAI HTML Client</title>
-  <script
-    src="https://code.jquery.com/jquery-3.7.1.min.js"
-    integrity="sha256-3fp9ZC2XqVbk7NpN/mBlC9ZwTe74MkRU2w35T0XkzU0="
-    crossorigin="anonymous"></script>
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <style>
     body {
       margin: 0;
@@ -18,6 +16,8 @@
     #app {
       display: flex;
       height: 100vh;
+      padding-bottom: 180px; /* keep controls visible when console is expanded */
+      box-sizing: border-box;
     }
     #sidebar {
       width: 260px;
@@ -81,6 +81,9 @@
       line-height: 1.4;
       white-space: pre-wrap;
     }
+    #terminal.hidden {
+      display: none;
+    }
     #terminal .line {
       margin: 2px 0;
     }
@@ -96,6 +99,203 @@
       background: #0b0c10;
       box-sizing: border-box;
       font-size: 13px;
+    }
+    #character-canvas {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      background: #0b0c10;
+      border-bottom: 1px solid #1f2833;
+      padding: 10px;
+      box-sizing: border-box;
+      overflow: hidden;
+      gap: 8px;
+    }
+    #canvas-gallery {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #0d1117;
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      padding: 6px;
+      min-height: 86px;
+      box-sizing: border-box;
+    }
+    #canvas-gallery-window {
+      flex: 1;
+      overflow: hidden;
+    }
+    #canvas-gallery-track {
+      display: flex;
+      gap: 8px;
+      transition: scroll-behavior 0.3s ease;
+      overflow-x: auto;
+      scrollbar-width: thin;
+      width: max-content;
+    }
+    .canvas-thumb {
+      width: 110px;
+      height: 70px;
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+      background: #11161f;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #c5c6c7;
+      font-size: 11px;
+      text-align: center;
+    }
+    .canvas-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .canvas-thumb .thumb-label {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 2px 4px;
+      background: rgba(0, 0, 0, 0.65);
+      font-size: 10px;
+      color: #66fcf1;
+      box-sizing: border-box;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .gallery-nav {
+      background: #1f2833;
+      color: #c5c6c7;
+      border: 1px solid #45a29e;
+      border-radius: 4px;
+      width: 26px;
+      height: 60px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+    .gallery-nav:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .canvas-gallery-empty {
+      color: #7b848f;
+      padding: 12px;
+      font-size: 12px;
+    }
+    #character-canvas.visible {
+      display: flex;
+    }
+    #canvas-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    #canvas-header .title {
+      font-weight: bold;
+      font-size: 14px;
+      color: #66fcf1;
+    }
+    #canvas-document {
+      width: 100%;
+      min-height: 220px;
+      resize: vertical;
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      padding: 8px;
+      background: #0b0c10;
+      color: #e5e5e5;
+      box-sizing: border-box;
+    }
+    #canvas-chat-log {
+      flex: 1;
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      padding: 8px;
+      overflow-y: auto;
+      background: #0d1117;
+      box-sizing: border-box;
+    }
+    .canvas-msg {
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #1f2833;
+      white-space: pre-wrap;
+    }
+    .canvas-msg .role {
+      font-weight: bold;
+      color: #45a29e;
+    }
+    #canvas-input-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    #canvas-user-prompt {
+      flex: 1;
+      min-height: 60px;
+      resize: vertical;
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      padding: 6px;
+      background: #0b0c10;
+      color: #e5e5e5;
+    }
+    #canvas-controls-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    #canvas-controls-row label {
+      font-size: 12px;
+      color: #c5c6c7;
+    }
+    #canvas-upload-input {
+      display: none;
+    }
+    .modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+    }
+    .modal-box {
+      background: #0b0c10;
+      border: 1px solid #1f2833;
+      border-radius: 6px;
+      padding: 12px;
+      min-width: 260px;
+      color: #e5e5e5;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+    .modal-box h4 {
+      margin: 0 0 8px 0;
+      color: #66fcf1;
+      font-size: 14px;
+    }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 10px;
     }
     #project-list {
       max-height: 200px;
@@ -174,6 +374,54 @@
     #file-upload-input {
       margin-top: 4px;
     }
+    #console-panel {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: #0b0c10;
+      border-top: 1px solid #1f2833;
+      box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.4);
+      font-size: 12px;
+      z-index: 10;
+    }
+    #console-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      cursor: pointer;
+      background: #11161f;
+      color: #c5c6c7;
+      border-bottom: 1px solid #1f2833;
+    }
+    #console-toggle-btn {
+      background: #1f2833;
+      color: #c5c6c7;
+      border: 1px solid #45a29e;
+      border-radius: 3px;
+      padding: 2px 6px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    #console-panel-body {
+      display: none;
+      max-height: 220px;
+      overflow-y: auto;
+      padding: 8px 10px;
+    }
+    #console-panel.expanded #console-panel-body {
+      display: block;
+    }
+    #console-log .line {
+      margin: 2px 0;
+    }
+    #console-log .line .prefix {
+      color: #45a29e;
+    }
+    #console-log .line.error {
+      color: #ff6b6b;
+    }
   </style>
 </head>
 <body>
@@ -184,6 +432,16 @@
     <button id="set-api-key-btn">Set API Key</button>
     <div id="api-key-status" style="font-size:11px;color:#c5c6c7;margin-top:4px;">
       Not set
+    </div>
+
+    <div class="section-title" style="margin-top:10px;">Assistant Model</div>
+    <select id="model-select">
+      <option value="gpt-4.1">gpt-4.1 (latest default)</option>
+      <option value="gpt-4o">gpt-4o</option>
+      <option value="gpt-4o-mini">gpt-4o-mini</option>
+    </select>
+    <div id="model-status" style="font-size:11px;color:#c5c6c7;margin-top:4px;">
+      Using: gpt-4.1 (latest default)
     </div>
 
     <div class="divider"></div>
@@ -201,6 +459,35 @@
   </div>
 
   <div id="main">
+    <div id="character-canvas">
+      <div id="canvas-gallery">
+        <button id="canvas-gallery-prev" class="gallery-nav">&#8249;</button>
+        <div id="canvas-gallery-window">
+          <div id="canvas-gallery-track"></div>
+        </div>
+        <button id="canvas-gallery-next" class="gallery-nav">&#8250;</button>
+      </div>
+      <div id="canvas-header">
+        <div class="title">Character Canvas: <span id="canvas-character-name">None</span></div>
+        <div id="canvas-controls-row">
+          <label for="canvas-ext-select">Format:</label>
+          <select id="canvas-ext-select">
+            <option value="txt">txt</option>
+            <option value="docx">docx</option>
+          </select>
+          <button id="save-character-sheet-btn">Save Sheet</button>
+          <button id="download-character-docx-btn">Download Word Doc</button>
+          <button id="upload-character-docx-btn">Upload Word Doc</button>
+          <input type="file" id="canvas-upload-input" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+        </div>
+      </div>
+      <textarea id="canvas-document" placeholder="Character sheet will appear here for collaborative editing..."></textarea>
+      <div id="canvas-chat-log"></div>
+      <div id="canvas-input-row">
+        <textarea id="canvas-user-prompt" placeholder="Ask the assistant to adjust this sheet..."></textarea>
+        <button id="canvas-send-btn">Send</button>
+      </div>
+    </div>
     <div id="terminal"></div>
     <div id="controls">
       <div class="section-title" style="margin-top:0;">Project Controls</div>
@@ -222,7 +509,27 @@
           <input type="file" id="file-upload-input" multiple />
           <button id="upload-docs-btn">Upload Docs for Category</button>
           <button id="list-category-files-btn">List Files in Category</button>
+          <select id="category-file-select" style="margin-top:4px;width:100%;">
+            <option value="">(refresh to see files)</option>
+          </select>
+          <button id="refresh-category-files-btn">Refresh File List</button>
           <button id="remove-category-file-btn">Remove File from Category</button>
+        </div>
+
+        <div class="control-group">
+          <div class="control-group-title">Characters</div>
+          <button id="scan-characters-btn">Scan for Other Characters</button>
+          <div style="margin-top:6px;font-size:11px;">Select or add a character:</div>
+          <select id="character-select">
+            <option value="">(none selected)</option>
+          </select>
+          <input type="text" id="character-name-input" placeholder="Character name" style="margin-top:4px;" />
+          <button id="set-character-btn">Select / Create Character</button>
+          <div style="margin-top:6px;font-size:11px;">Current: <span id="current-character-name">None</span></div>
+          <button id="work-character-sheet-btn" style="margin-top:6px;">Work on Character Sheet</button>
+          <div style="margin-top:6px;font-size:11px;">Photo (jpeg/png):</div>
+          <input type="file" id="character-photo-input" accept="image/jpeg,image/png" />
+          <button id="character-photo-btn">Review / Edit Photos</button>
         </div>
 
         <div class="control-group">
@@ -257,16 +564,179 @@
   </div>
 </div>
 
+<div id="console-panel" class="collapsed">
+  <div id="console-panel-header">
+    <span id="console-panel-title">Console (collapsed)</span>
+    <button id="console-toggle-btn">Expand</button>
+  </div>
+  <div id="console-panel-body">
+    <div id="console-log"></div>
+  </div>
+</div>
+
 <script>
 
   // ==============================
   // GLOBAL STATE
   // ==============================
 
-  let apiKey = null;
+  const DEFAULT_API_KEY = "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";
+  let apiKey = DEFAULT_API_KEY;
   const PROJECTS_KEY = "novelStudioProjects"; // localStorage key
+  const MODEL_KEY = "novelStudioAssistantModel";
+  const ASSISTANT_MODELS = ["gpt-4.1", "gpt-4o", "gpt-4o-mini"];
   let projects = {}; // { projectName: {name, assistants, vectorStores, outlines, chapters} }
   let currentProjectName = null;
+  let assistantModel = ASSISTANT_MODELS[0];
+  let currentCharacterName = null;
+  let consoleExpanded = false;
+  let canvasActive = false;
+
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function dataUrlToFile(dataUrl, filename) {
+    const arr = dataUrl.split(",");
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : "application/octet-stream";
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, { type: mime });
+  }
+
+  function escapeXml(text) {
+    return (text || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+  }
+
+  function buildDocxDocumentXml(text) {
+    const paragraphs = (text || "").split(/\r?\n/);
+    const body = paragraphs
+      .map((line) => `<w:p><w:r><w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r></w:p>`)
+      .join("");
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" mc:Ignorable="w14 wp14">
+  <w:body>${body}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr></w:body>
+</w:document>`;
+  }
+
+  async function generateDocxFromText(text) {
+    const zip = new JSZip();
+    zip.file(
+      "[Content_Types].xml",
+      `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`
+    );
+    zip.folder("_rels").file(
+      ".rels",
+      `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`
+    );
+    const word = zip.folder("word");
+    word.folder("_rels").file(
+      "document.xml.rels",
+      `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/officeDocument/2006/relationships"></Relationships>`
+    );
+    word.file("document.xml", buildDocxDocumentXml(text));
+    return await zip.generateAsync({
+      type: "blob",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+  }
+
+  function decodeXmlEntities(str) {
+    const txt = document.createElement("textarea");
+    txt.innerHTML = str;
+    return txt.value;
+  }
+
+  async function extractDocxText(file) {
+    const data = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(data);
+    const docFile = zip.file("word/document.xml");
+    if (!docFile) throw new Error("Invalid docx: missing document.xml");
+    const xml = await docFile.async("string");
+    const matches = [...xml.matchAll(/<w:t[^>]*>(.*?)<\/w:t>/g)];
+    const text = matches.map((m) => decodeXmlEntities(m[1])).join("\n");
+    return text.trim();
+  }
+
+  function showSelectModal(title, options) {
+    return new Promise((resolve) => {
+      const backdrop = document.createElement("div");
+      backdrop.className = "modal-backdrop";
+
+      const box = document.createElement("div");
+      box.className = "modal-box";
+
+      const h4 = document.createElement("h4");
+      h4.textContent = title;
+      box.appendChild(h4);
+
+      const select = document.createElement("select");
+      select.style.width = "100%";
+      options.forEach((opt) => {
+        const o = document.createElement("option");
+        o.value = opt.value;
+        o.textContent = opt.label;
+        select.appendChild(o);
+      });
+      box.appendChild(select);
+
+      const actions = document.createElement("div");
+      actions.className = "modal-actions";
+      const cancelBtn = document.createElement("button");
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.onclick = () => {
+        document.body.removeChild(backdrop);
+        resolve(null);
+      };
+      const okBtn = document.createElement("button");
+      okBtn.textContent = "Confirm";
+      okBtn.onclick = () => {
+        const val = select.value;
+        document.body.removeChild(backdrop);
+        resolve(val || null);
+      };
+      actions.appendChild(cancelBtn);
+      actions.appendChild(okBtn);
+      box.appendChild(actions);
+
+      backdrop.appendChild(box);
+      document.body.appendChild(backdrop);
+    });
+  }
+
+  function logToConsolePanel(message, isError = false) {
+    const $line = $("<div>").addClass("line");
+    if (isError) $line.addClass("error");
+    const prefix = isError ? "[ERR]" : "[LOG]";
+    $line.append($("<span>").addClass("prefix").text(prefix + " "));
+    $line.append(document.createTextNode(message));
+    $("#console-log").append($line);
+    $("#console-log").scrollTop($("#console-log")[0].scrollHeight);
+  }
 
   function logLine(message, isError = false) {
     const $line = $("<div>").addClass("line");
@@ -276,6 +746,7 @@
     $line.append(document.createTextNode(message));
     $("#terminal").append($line);
     $("#terminal").scrollTop($("#terminal")[0].scrollHeight);
+    logToConsolePanel(message, isError);
   }
 
   function setStatus(message) {
@@ -294,6 +765,43 @@
       logLine("Failed to load projects from localStorage: " + e, true);
       projects = {};
     }
+  }
+
+  function updateModelStatus() {
+    $("#model-status").text(`Using: ${assistantModel}`);
+  }
+
+  function loadModelPreference() {
+    try {
+      const saved = localStorage.getItem(MODEL_KEY);
+      if (saved && ASSISTANT_MODELS.includes(saved)) {
+        assistantModel = saved;
+      }
+      $("#model-select").val(assistantModel);
+      updateModelStatus();
+      localStorage.setItem(MODEL_KEY, assistantModel);
+    } catch (e) {
+      logLine("Failed to load model preference: " + e, true);
+    }
+  }
+
+  function setAssistantModel(model) {
+    if (!ASSISTANT_MODELS.includes(model)) {
+      logLine("Unsupported model selection: " + model, true);
+      $("#model-select").val(assistantModel);
+      return;
+    }
+    assistantModel = model;
+    localStorage.setItem(MODEL_KEY, assistantModel);
+    updateModelStatus();
+    logLine("Assistant model set to " + assistantModel + ".");
+  }
+
+  function setConsoleExpanded(expanded) {
+    consoleExpanded = expanded;
+    $("#console-panel").toggleClass("expanded", expanded);
+    $("#console-panel-title").text(expanded ? "Console (expanded)" : "Console (collapsed)");
+    $("#console-toggle-btn").text(expanded ? "Collapse" : "Expand");
   }
 
   function saveProjectsToStorage() {
@@ -335,7 +843,54 @@
     if (!project.vectorStores) project.vectorStores = {};
     if (!project.outlines) project.outlines = {};
     if (!project.chapters) project.chapters = {};
+    if (!project.characters) project.characters = {};
     return project;
+  }
+
+  function ensureCharacterRecord(project, name) {
+    const cleanName = (name || "").trim();
+    if (!cleanName) return null;
+    project.characters = project.characters || {};
+    if (!project.characters[cleanName]) {
+      project.characters[cleanName] = {
+        sheet: null,
+        photos: [],
+      };
+    }
+    return project.characters[cleanName];
+  }
+
+  function refreshCharacterSelectUI(project) {
+    const $sel = $("#character-select");
+    $sel.empty();
+    $sel.append($("<option>").val("").text("(none selected)"));
+    const names = Object.keys(project?.characters || {}).sort();
+    names.forEach((name) => {
+      const opt = $("<option>").val(name).text(name);
+      if (name === currentCharacterName) {
+        opt.attr("selected", "selected");
+      }
+      $sel.append(opt);
+    });
+    $("#current-character-name").text(currentCharacterName || "None");
+  }
+
+  function setCurrentCharacter(project, name) {
+    const cleanName = (name || "").trim();
+    if (!cleanName) {
+      currentCharacterName = null;
+      refreshCharacterSelectUI(project);
+      logLine("Cleared current character selection.");
+      return;
+    }
+    ensureCharacterRecord(project, cleanName);
+    currentCharacterName = cleanName;
+    saveProjectsToStorage();
+    refreshCharacterSelectUI(project);
+    if (canvasActive) {
+      $("#canvas-character-name").text(cleanName);
+    }
+    logLine("Working on character: " + cleanName);
   }
 
   function selectProject(name) {
@@ -345,6 +900,11 @@
     }
     currentProjectName = name;
     $("#current-project-name").text(name);
+    currentCharacterName = null;
+    canvasActive = false;
+    $("#character-canvas").removeClass("visible");
+    $("#terminal").removeClass("hidden");
+    refreshCharacterSelectUI(projects[name]);
     logLine("Switched to project: " + name);
     setStatus("Project " + name + " loaded.");
   }
@@ -427,6 +987,20 @@
     }
     // Expect binary audio
     return await res.blob();
+  }
+
+  async function editImageWithPrompt(baseFile, promptText) {
+    const formData = new FormData();
+    formData.append("model", "gpt-image-1");
+    formData.append("image", baseFile);
+    formData.append("prompt", promptText || "Enhance the portrait.");
+    formData.append("size", "1024x1024");
+    const res = await openaiFormData("/images/edits", formData, false);
+    const b64 = res?.data?.[0]?.b64_json;
+    if (!b64) {
+      throw new Error("No edited image returned from OpenAI");
+    }
+    return "data:image/png;base64," + b64;
   }
 
   async function runAssistantOnce(assistantId, userText) {
@@ -553,7 +1127,7 @@
     const body = {
       name: project.name + " [" + roleName + "]",
       instructions: instructions,
-      model: "gpt-4o",
+      model: assistantModel,
       tools: tools,
     };
     if (toolResources) {
@@ -685,6 +1259,21 @@ Provide:
 - Concrete suggestions for restructuring or tightening the narrative.
 `.trim();
 
+    const characterDesignerInstructions = `
+You are the CHARACTER DESIGNER and SHEET EDITOR.
+Use file_search to consult lore, outlines, and prior sheets.
+
+When asked to draft or refine a character sheet:
+- Respect established canon and note uncertainties.
+- Keep the sheet concise but complete: identity, appearance, voice, skills, relationships, secrets, goals, and conflicts.
+- Output full text that can be saved directly as a sheet.
+- Maintain the naming convention "[Name] Character Sheet.[ext]" where ext is txt or docx.
+
+When asked about photos:
+- Provide brief visual guidance for portraits consistent with the character sheet.
+- Be explicit about face angle, lighting, expression, and hair details for profile shots.
+`.trim();
+
     project.vectorStores = project.vectorStores || {};
 
     await createOrGetAssistant(project, "LoreKeeper", loreInstructions, true);
@@ -694,6 +1283,7 @@ Provide:
     await createOrGetAssistant(project, "LineEditor", lineEditorInstructions, false);
     await createOrGetAssistant(project, "ContinuityEditor", continuityInstructions, true);
     await createOrGetAssistant(project, "BookReviewer", bookReviewerInstructions, true);
+    await createOrGetAssistant(project, "CharacterDesigner", characterDesignerInstructions, true);
 
     setStatus("Assistants initialized.");
     logLine("Assistants initialized.");
@@ -712,6 +1302,340 @@ Provide:
 
   function chapterKey(bookNumber, act, chapter) {
     return `book_${bookNumber}_act_${act}_chapter_${chapter}`;
+  }
+
+  // ==============================
+  // WORKFLOWS: CHARACTERS
+  // ==============================
+
+  function getActiveCharacterName(project) {
+    const selected = $("#character-select").val();
+    const typed = $("#character-name-input").val().trim();
+    if (selected) return selected;
+    if (typed) return typed;
+    if (currentCharacterName) return currentCharacterName;
+    const names = Object.keys(project?.characters || {});
+    return names[0] || null;
+  }
+
+  async function scanForOtherCharacters(project) {
+    const known = Object.keys(project.characters || {});
+    const prompt = `
+Scan all available story materials using file_search and identify named characters
+who appear important but do NOT have a character sheet yet.
+
+Current character sheets: ${known.length ? known.join(", ") : "(none)"}
+
+Return a short bullet list with: character name, why they matter, and a suggested
+"[Name] Character Sheet.txt" title if we should create one.
+`.trim();
+
+    const text = await runProjectAssistant(project, "LoreKeeper", prompt);
+    if (!text) {
+      logLine("No scan results returned.", true);
+      return;
+    }
+    logLine("Potential characters to add:\n" + text);
+  }
+
+  function showCharacterCanvas(project, name) {
+    const record = ensureCharacterRecord(project, name) || {};
+    const $canvas = $("#character-canvas");
+    canvasActive = true;
+    $("#terminal").empty();
+    $("#terminal").addClass("hidden");
+    $canvas.addClass("visible").show();
+    try {
+      $canvas[0]?.scrollIntoView({ behavior: "smooth" });
+    } catch (_) {
+      // ignore scroll failures
+    }
+    setStatus(`Canvas mode: editing ${name}`);
+    $("#canvas-character-name").text(name);
+    renderCharacterGallery(record, name);
+    $("#canvas-document").val(record.sheet?.text || "");
+    $("#canvas-ext-select").val(record.sheet?.ext || "docx");
+    $("#canvas-chat-log").empty();
+    $("#canvas-user-prompt").val("");
+    appendCanvasMessage(
+      "system",
+      record.sheet?.text
+        ? "Loaded existing character sheet into the canvas. Ask for revisions or edit directly."
+        : "No saved sheet yet. Draft here or ask the assistant to create one."
+    );
+  }
+
+  function renderCharacterGallery(record, name) {
+    const photos = record?.photos || [];
+    const $track = $("#canvas-gallery-track");
+    const $prev = $("#canvas-gallery-prev");
+    const $next = $("#canvas-gallery-next");
+    $track.empty();
+
+    if (!photos.length) {
+      $track.append(
+        $("<div>")
+          .addClass("canvas-gallery-empty")
+          .text(`No images for ${name} yet. Add a profile or gallery photo to see it here.`)
+      );
+      $prev.prop("disabled", true);
+      $next.prop("disabled", true);
+      return;
+    }
+
+    photos.forEach((p) => {
+      const $thumb = $("<div>").addClass("canvas-thumb");
+      if (p.dataUrl) {
+        $thumb.append($("<img>").attr("src", p.dataUrl).attr("alt", p.filename || p.type || "photo"));
+      } else {
+        $thumb.text(p.filename || (p.type === "profile" ? "Profile" : "Photo"));
+      }
+      $thumb.append($("<div>").addClass("thumb-label").text(p.filename || p.type || "photo"));
+      $track.append($thumb);
+    });
+
+    updateGalleryNavButtons();
+  }
+
+  function updateGalleryNavButtons() {
+    const trackEl = document.getElementById("canvas-gallery-track");
+    const windowEl = document.getElementById("canvas-gallery-window");
+    const hasPhotos = trackEl && trackEl.children.length > 0 && !trackEl.querySelector(".canvas-gallery-empty");
+    if (!trackEl || !windowEl) return;
+    const maxScroll = Math.max(0, trackEl.scrollWidth - windowEl.clientWidth);
+    const current = trackEl.scrollLeft;
+    $("#canvas-gallery-prev").prop("disabled", !hasPhotos || current <= 1);
+    $("#canvas-gallery-next").prop("disabled", !hasPhotos || current >= maxScroll - 1);
+  }
+
+  function scrollGallery(delta) {
+    const trackEl = document.getElementById("canvas-gallery-track");
+    if (!trackEl) return;
+    trackEl.scrollBy({ left: delta, behavior: "smooth" });
+    setTimeout(updateGalleryNavButtons, 200);
+  }
+
+  function appendCanvasMessage(role, text) {
+    const $msg = $("<div>").addClass("canvas-msg");
+    $msg.append($("<div>").addClass("role").text(role.toUpperCase()));
+    $msg.append($("<div>").text(text));
+    $("#canvas-chat-log").append($msg);
+    $("#canvas-chat-log").scrollTop($("#canvas-chat-log")[0].scrollHeight);
+  }
+
+  async function sendCharacterCanvasPrompt(project) {
+    if (!canvasActive) return;
+    const name = currentCharacterName;
+    const promptText = $("#canvas-user-prompt").val().trim();
+    if (!name || !promptText) return;
+    const currentSheet = $("#canvas-document").val();
+    appendCanvasMessage("you", promptText);
+    $("#canvas-user-prompt").val("");
+    setStatus("Running CharacterDesigner for canvas...");
+    const combinedPrompt = `You are collaborating on an editable character sheet for ${name}.
+The current sheet content is:
+${currentSheet || "(none yet)"}
+
+User request:
+${promptText}
+
+Return the fully updated character sheet text only, ready to replace the document.`;
+    try {
+      const reply = await runProjectAssistant(project, "CharacterDesigner", combinedPrompt);
+      if (reply) {
+        $("#canvas-document").val(reply);
+        appendCanvasMessage("assistant", reply);
+      } else {
+        appendCanvasMessage("assistant", "No reply returned.");
+      }
+    } catch (e) {
+      appendCanvasMessage("assistant", "Error: " + e.message);
+      logLine("Canvas prompt error: " + e.message, true);
+    }
+    setStatus("Ready.");
+  }
+
+  async function saveCanvasCharacterSheet(project, options = {}) {
+    const name = currentCharacterName;
+    if (!name) {
+      alert("Select a character first.");
+      return;
+    }
+    const record = ensureCharacterRecord(project, name);
+    const ext = $("#canvas-ext-select").val();
+    const text = options.textOverride || $("#canvas-document").val();
+    const filename = `${name} Character Sheet.${ext}`;
+    const vsId = await ensureVectorStore(project, "characters");
+
+    let uploadFile = options.sourceFile || null;
+    if (!uploadFile) {
+      if (ext === "docx") {
+        const docxBlob = await generateDocxFromText(text);
+        uploadFile = new File([docxBlob], filename, {
+          type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+      } else {
+        uploadFile = new File([text], filename, { type: "text/plain" });
+      }
+    }
+
+    if (record.sheet?.fileId) {
+      try {
+        await deleteVectorStoreFile(vsId, record.sheet.fileId);
+        await deleteOpenAIFile(record.sheet.fileId);
+      } catch (e) {
+        logLine("Failed to remove old sheet file: " + e.message, true);
+      }
+    }
+
+    const uploadRes = await uploadFileToOpenAI(uploadFile);
+    await attachFileToVectorStore(vsId, uploadRes.id);
+    record.sheet = {
+      fileId: uploadRes.id,
+      filename,
+      ext,
+      text,
+    };
+    saveProjectsToStorage();
+    logLine(`Saved character sheet for ${name}: ${filename} (fileId: ${uploadRes.id})`);
+    appendCanvasMessage("system", `Saved and attached ${filename}.`);
+  }
+
+  async function downloadCharacterSheetDocx(name, text) {
+    const blob = await generateDocxFromText(text || "");
+    const filename = `${name} Character Sheet.docx`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function replaceCharacterSheetFromUpload(project, file) {
+    if (!file) return;
+    const name = currentCharacterName;
+    const text = await extractDocxText(file);
+    $("#canvas-document").val(text);
+    $("#canvas-ext-select").val("docx");
+    await saveCanvasCharacterSheet(project, { sourceFile: file, textOverride: text });
+    appendCanvasMessage("system", `${file.name} uploaded and applied to the sheet.`);
+  }
+
+  async function workOnCharacterSheet(project) {
+    const name = getActiveCharacterName(project);
+    if (!name) {
+      alert("Select or enter a character first.");
+      return;
+    }
+    ensureCharacterRecord(project, name);
+    setCurrentCharacter(project, name);
+    showCharacterCanvas(project, name);
+    logLine(`Opened canvas for ${name}.`);
+  }
+
+  function describeCharacterPhotos(record) {
+    if (!record?.photos?.length) return "(none yet)";
+    return record.photos
+      .map((p, idx) => `${idx + 1}. ${p.filename} [${p.type === "profile" ? "profile" : "gallery"}]`)
+      .join("\n");
+  }
+
+  async function reviewOrEditCharacterPhotos(project) {
+    const name = getActiveCharacterName(project);
+    if (!name) {
+      alert("Select or enter a character first.");
+      return;
+    }
+    const record = ensureCharacterRecord(project, name);
+    setCurrentCharacter(project, name);
+
+    const summary = describeCharacterPhotos(record);
+    logLine(`Current photos for ${name}:\n${summary}`);
+
+    const mode =
+      prompt(
+        `Choose photo action for ${name} (profile/add/edit):\n${summary}`,
+        record.photos.length ? "edit" : "profile"
+      ) || "";
+    const modeLower = mode.toLowerCase();
+    if (!modeLower) return;
+
+    const fileInput = document.getElementById("character-photo-input");
+    const baseFromPicker = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+    let targetPhoto = null;
+
+    if (modeLower.startsWith("edit")) {
+      const idxStr = prompt("Which photo number to edit?", "1");
+      const idx = Math.max(0, (parseInt(idxStr || "1", 10) || 1) - 1);
+      targetPhoto = record.photos[idx];
+    } else if (modeLower.includes("profile")) {
+      targetPhoto = record.photos.find((p) => p.type === "profile") || null;
+    }
+
+    let baseFile = baseFromPicker;
+    if (!baseFile && targetPhoto?.dataUrl) {
+      baseFile = dataUrlToFile(targetPhoto.dataUrl, targetPhoto.filename || `${name} Profile.png`);
+    }
+
+    if (!baseFile) {
+      alert("Please choose a base image in the character photo picker or select an existing entry to edit.");
+      return;
+    }
+
+    const defaultImagePrompt =
+      "Head-on portrait with clear facial features, accurate hairstyle, balanced lighting, and the character's typical expression.";
+    const promptText = prompt("How should this image be adjusted?", defaultImagePrompt) || defaultImagePrompt;
+
+    const editedDataUrl = await editImageWithPrompt(baseFile, promptText);
+    const isProfile = modeLower.includes("profile") || targetPhoto?.type === "profile";
+    const galleryIndex = record.photos.filter((p) => p.type === "gallery").length + 1;
+    const filename = isProfile
+      ? `${name} Profile.jpg`
+      : `${name} Photo ${String(galleryIndex).padStart(2, "0")}.jpg`;
+    const newFile = dataUrlToFile(editedDataUrl, filename);
+
+    const vsId = await ensureVectorStore(project, "characters");
+    if (targetPhoto?.fileId) {
+      try {
+        await deleteVectorStoreFile(vsId, targetPhoto.fileId);
+        await deleteOpenAIFile(targetPhoto.fileId);
+      } catch (e) {
+        logLine("Failed to remove old photo file: " + e.message, true);
+      }
+    }
+
+    const uploadRes = await uploadFileToOpenAI(newFile);
+    await attachFileToVectorStore(vsId, uploadRes.id);
+
+    const entry = {
+      fileId: uploadRes.id,
+      filename,
+      type: isProfile ? "profile" : "gallery",
+      dataUrl: editedDataUrl,
+    };
+
+    if (isProfile) {
+      record.photos = (record.photos || []).filter((p) => p.type !== "profile");
+      record.photos.unshift(entry);
+    } else if (modeLower.startsWith("edit") && targetPhoto) {
+      const idx = record.photos.indexOf(targetPhoto);
+      if (idx >= 0) {
+        record.photos[idx] = entry;
+      } else {
+        record.photos.push(entry);
+      }
+    } else {
+      record.photos.push(entry);
+    }
+
+    saveProjectsToStorage();
+    logLine(`Saved ${isProfile ? "profile" : "gallery"} image for ${name}: ${filename} (fileId: ${uploadRes.id})`);
+    if (fileInput) fileInput.value = "";
+
+    if (canvasActive && currentCharacterName === name) {
+      renderCharacterGallery(record, name);
+    }
   }
 
   // ==============================
@@ -1317,15 +2241,48 @@ Please:
       return;
     }
     logLine(`Listing files for category '${category}' (vs: ${vsId})...`);
-    const res = await listVectorStoreFiles(vsId);
-    if (!res.data || !res.data.length) {
+    const files = await loadCategoryFileOptions(project, category);
+    if (!files.length) {
       logLine("No files in that vector store.");
       return;
     }
-    for (const item of res.data) {
-      const meta = await retrieveOpenAIFile(item.id);
-      logLine(`  fileId=${item.id} | filename=${meta.filename} | status=${item.status}`);
+    files.forEach((item) => {
+      logLine(`  fileId=${item.id} | filename=${item.filename} | status=${item.status}`);
+    });
+  }
+
+  async function loadCategoryFileOptions(project, category) {
+    const vsId = project.vectorStores && project.vectorStores[category];
+    const $sel = $("#category-file-select");
+    $sel.empty();
+    if (!vsId) {
+      $sel.append($("<option>").val("").text("(no vector store)"));
+      return [];
     }
+    const res = await listVectorStoreFiles(vsId);
+    const results = [];
+    if (!res.data || !res.data.length) {
+      $sel.append($("<option>").val("").text("(no files)"));
+      return results;
+    }
+    for (const item of res.data) {
+      let filename = item.id;
+      try {
+        const meta = await retrieveOpenAIFile(item.id);
+        filename = meta.filename || filename;
+      } catch (e) {
+        // ignore
+      }
+      results.push({ id: item.id, filename, status: item.status });
+    }
+    results.forEach((r) => {
+      $sel.append(
+        $("<option>")
+          .val(r.id)
+          .text(`${r.filename} (${r.status})`)
+      );
+    });
+    return results;
   }
 
   async function removeFileFromCategory(project) {
@@ -1335,8 +2292,35 @@ Please:
       logLine("No vector store for category '" + category + "'.", true);
       return;
     }
-    const fileId = prompt("Enter the fileId to remove from this category:", "");
-    if (!fileId) return;
+    const files = await loadCategoryFileOptions(project, category);
+    if (!files.length) {
+      logLine("No files available to remove.", true);
+      return;
+    }
+    let choice = null;
+    if (typeof showSelectModal === "function") {
+      choice = await showSelectModal(
+        `Remove file from ${category}`,
+        files.map((f) => ({ value: f.id, label: `${f.filename} (${f.status})` }))
+      );
+    } else {
+      logLine(
+        "Selection modal unavailable; falling back to prompt-based selection.",
+        true
+      );
+      const labelList = files
+        .map((f, idx) => `${idx + 1}. ${f.filename} (${f.status})`)
+        .join("\n");
+      const raw = prompt(
+        `Select a file number to remove from ${category}:\n${labelList}`
+      );
+      const index = raw ? parseInt(raw, 10) - 1 : -1;
+      if (index >= 0 && index < files.length) {
+        choice = files[index].id;
+      }
+    }
+    if (!choice) return;
+    const fileId = choice;
     try {
       await deleteVectorStoreFile(vsId, fileId);
       logLine("Removed file from vector store: " + fileId);
@@ -1355,9 +2339,30 @@ Please:
 
   $(function () {
     loadProjectsFromStorage();
+    loadModelPreference();
     refreshProjectListUI();
+    const initialProject = currentProjectName && projects[currentProjectName] ? projects[currentProjectName] : { characters: {} };
+    refreshCharacterSelectUI(initialProject);
+    setConsoleExpanded(false);
+    $("#api-key-input").val(apiKey);
+    $("#api-key-status").text("Preloaded test key (change as needed)");
+    logLine("API key preloaded for testing. Replace or clear as needed.");
     logLine("Novel Studio HTML client loaded.");
     setStatus("Ready.");
+
+    $("#model-select").on("change", function () {
+      const model = $(this).val();
+      setAssistantModel(model);
+    });
+
+    $("#console-panel-header").on("click", function () {
+      setConsoleExpanded(!consoleExpanded);
+    });
+
+    $("#console-toggle-btn").on("click", function (e) {
+      e.stopPropagation();
+      setConsoleExpanded(!consoleExpanded);
+    });
 
     $("#set-api-key-btn").on("click", function () {
       const key = $("#api-key-input").val().trim();
@@ -1387,6 +2392,7 @@ Please:
       });
       saveProjectsToStorage();
       refreshProjectListUI();
+      refreshCharacterSelectUI(projects[name]);
       selectProject(name);
       $("#new-project-name").val("");
     });
@@ -1404,7 +2410,70 @@ Please:
       currentProjectName = null;
       $("#current-project-name").text("None");
       refreshProjectListUI();
+      refreshCharacterSelectUI({ characters: {} });
       logLine("Deleted project (local only).");
+    });
+
+    $("#character-select").on("change", function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      const name = $(this).val();
+      setCurrentCharacter(project, name);
+    });
+
+    $("#set-character-btn").on("click", function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      const typed = $("#character-name-input").val().trim();
+      const selected = $("#character-select").val();
+      const name = typed || selected;
+      if (!name) {
+        alert("Enter a character name first.");
+        return;
+      }
+      ensureCharacterRecord(project, name);
+      saveProjectsToStorage();
+      setCurrentCharacter(project, name);
+    });
+
+    $("#scan-characters-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await scanForOtherCharacters(project);
+      } catch (e) {
+        logLine("Error scanning for characters: " + e.message, true);
+      }
+    });
+
+    $("#work-character-sheet-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await workOnCharacterSheet(project);
+      } catch (e) {
+        logLine("Error updating character sheet: " + e.message, true);
+      }
+    });
+
+    $("#character-photo-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await reviewOrEditCharacterPhotos(project);
+      } catch (e) {
+        logLine("Error updating character photos: " + e.message, true);
+      }
+    });
+
+    $("#canvas-gallery-prev").on("click", function () {
+      scrollGallery(-180);
+    });
+    $("#canvas-gallery-next").on("click", function () {
+      scrollGallery(180);
+    });
+    $("#canvas-gallery-track").on("scroll", function () {
+      updateGalleryNavButtons();
     });
 
     $("#init-assistants-btn").on("click", async function () {
@@ -1427,6 +2496,16 @@ Please:
       }
     });
 
+    $("#refresh-category-files-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await loadCategoryFileOptions(project, $("#doc-category-select").val());
+      } catch (e) {
+        logLine("Error refreshing file list: " + e.message, true);
+      }
+    });
+
     $("#list-category-files-btn").on("click", async function () {
       const project = getCurrentProject();
       if (!project) return;
@@ -1444,6 +2523,52 @@ Please:
         await removeFileFromCategory(project);
       } catch (e) {
         logLine("Error removing file: " + e.message, true);
+      }
+    });
+
+    $("#canvas-send-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      await sendCharacterCanvasPrompt(project);
+    });
+
+    $("#save-character-sheet-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await saveCanvasCharacterSheet(project);
+      } catch (e) {
+        logLine("Error saving character sheet: " + e.message, true);
+      }
+    });
+
+    $("#download-character-docx-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      const name = currentCharacterName;
+      if (!name) {
+        alert("Select a character first.");
+        return;
+      }
+      const text = $("#canvas-document").val();
+      await downloadCharacterSheetDocx(name, text);
+    });
+
+    $("#upload-character-docx-btn").on("click", function () {
+      $("#canvas-upload-input").click();
+    });
+
+    $("#canvas-upload-input").on("change", async function (e) {
+      const project = getCurrentProject();
+      if (!project) return;
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        await replaceCharacterSheetFromUpload(project, file);
+      } catch (err) {
+        logLine("Error applying uploaded docx: " + err.message, true);
+      } finally {
+        $("#canvas-upload-input").val("");
       }
     });
 
