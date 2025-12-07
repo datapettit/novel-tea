@@ -19,11 +19,15 @@
       box-sizing: border-box;
     }
     #sidebar {
-      width: 260px;
+      width: 320px;
       border-right: 1px solid #1f2833;
       background: #0b0c10;
       padding: 10px;
       box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      overflow-y: auto;
     }
     #main {
       flex: 1;
@@ -209,13 +213,16 @@
     #canvas-document {
       width: 100%;
       min-height: 220px;
-      resize: vertical;
       border: 1px solid #1f2833;
       border-radius: 4px;
-      padding: 8px;
+      padding: 10px;
       background: #0b0c10;
       color: #e5e5e5;
       box-sizing: border-box;
+      white-space: pre-wrap;
+      line-height: 1.5;
+      outline: none;
+      overflow-y: auto;
     }
     #canvas-chat-log {
       flex: 1;
@@ -358,6 +365,64 @@
       color: #66fcf1;
       font-size: 12px;
     }
+    .menu-panel {
+      border: 1px solid #1f2833;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #0d1117;
+    }
+    .menu-panel summary {
+      cursor: pointer;
+      padding: 8px 10px;
+      font-weight: bold;
+      color: #66fcf1;
+      background: #0f111a;
+      border-bottom: 1px solid #1f2833;
+      list-style: none;
+    }
+    .menu-body {
+      padding: 8px 10px 12px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .menu-subgroup {
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      padding: 8px;
+      background: #0b0c10;
+    }
+    .menu-subtitle {
+      font-weight: bold;
+      color: #c5c6c7;
+      margin-bottom: 6px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .roster-list {
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      max-height: 140px;
+      overflow-y: auto;
+      padding: 6px;
+      background: #0d1117;
+      font-size: 12px;
+      color: #c5c6c7;
+    }
+    .roster-row {
+      padding: 4px 0;
+      border-bottom: 1px solid #151a24;
+    }
+    .roster-row:last-child {
+      border-bottom: none;
+    }
+    .menu-inline-controls {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
     .control-group button {
       display: block;
       width: 100%;
@@ -455,6 +520,125 @@
     <div id="current-project-label" style="margin-top:10px;font-size:12px;color:#c5c6c7;">
       Current project: <span id="current-project-name">None</span>
     </div>
+
+    <div class="section-title" style="margin-top:14px;">Workspace Menus</div>
+
+    <details class="menu-panel" open>
+      <summary>Setup & Docs</summary>
+      <div class="menu-body">
+        <div class="menu-subgroup">
+          <div class="menu-subtitle">Assistant Setup</div>
+          <button id="init-assistants-btn">Initialize / Recreate Assistants</button>
+        </div>
+        <div class="menu-subgroup">
+          <div class="menu-subtitle">Document Libraries</div>
+          <div style="margin-top:2px;font-size:11px;">Upload documents to vector stores:</div>
+          <select id="doc-category-select">
+            <option value="characters">characters</option>
+            <option value="locations">locations</option>
+            <option value="relationships">relationships</option>
+            <option value="storyline">storyline</option>
+            <option value="history">history</option>
+            <option value="outlines">outlines</option>
+            <option value="drafts">drafts</option>
+          </select>
+          <input type="file" id="file-upload-input" multiple />
+          <div class="menu-inline-controls">
+            <button id="upload-docs-btn">Upload Docs for Category</button>
+            <button id="list-category-files-btn">List Files in Category</button>
+          </div>
+          <select id="category-file-select" style="width:100%;">
+            <option value="">(refresh to see files)</option>
+          </select>
+          <div class="menu-inline-controls">
+            <button id="refresh-category-files-btn">Refresh File List</button>
+            <button id="remove-category-file-btn">Remove File from Category</button>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="menu-panel" open>
+      <summary>Character Development</summary>
+      <div class="menu-body">
+        <div class="menu-subgroup">
+          <div class="menu-subtitle">Roster</div>
+          <button id="refresh-characters-btn">Refresh Character Roster</button>
+          <div id="character-roster-list" class="roster-list">(no character files yet)</div>
+          <div style="margin-top:6px;font-size:11px;">Select or add a character:</div>
+          <select id="character-select">
+            <option value="">(none selected)</option>
+          </select>
+          <input type="text" id="character-name-input" placeholder="Character name" style="margin-top:4px;" />
+          <button id="set-character-btn">Select / Create Character</button>
+          <div style="margin-top:6px;font-size:11px;">Current: <span id="current-character-name">None</span></div>
+        </div>
+        <div class="menu-subgroup">
+          <div class="menu-subtitle">Sheets & Canvas</div>
+          <button id="work-character-sheet-btn" style="margin-top:0;">Open Character Canvas</button>
+          <button id="scan-characters-btn">Scan for Other Characters</button>
+        </div>
+        <div class="menu-subgroup">
+          <div class="menu-subtitle">Photos</div>
+          <div style="margin-top:2px;font-size:11px;">Photo (jpeg/png):</div>
+          <input type="file" id="character-photo-input" accept="image/jpeg,image/png" />
+          <div class="menu-inline-controls">
+            <select id="photo-action-select" style="min-width:120px;">
+              <option value="profile">Profile</option>
+              <option value="add">Add Gallery Photo</option>
+              <option value="edit">Edit Existing</option>
+            </select>
+            <select id="photo-target-select" style="min-width:140px;">
+              <option value="">(choose existing)</option>
+            </select>
+          </div>
+          <button id="character-photo-btn">Review / Edit Photos</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="menu-panel" open>
+      <summary>Story Building</summary>
+      <div class="menu-body">
+        <div class="menu-subgroup">
+          <div class="menu-subtitle">Story Targets</div>
+          <div class="menu-inline-controls">
+            <select id="book-select" style="min-width:120px;">
+              <option value="">Select book</option>
+            </select>
+            <button id="refresh-story-targets-btn" class="small">Refresh</button>
+          </div>
+          <div class="menu-inline-controls">
+            <select id="act-select" style="min-width:90px;">
+              <option value="">Act</option>
+            </select>
+            <select id="chapter-select" style="min-width:110px;">
+              <option value="">Chapter</option>
+            </select>
+          </div>
+        </div>
+        <div class="menu-subgroup">
+          <div class="menu-subtitle">Outlines</div>
+          <button id="build-trilogy-outline-btn">Build Trilogy Outline (Markdown)</button>
+          <button id="build-book-outline-btn">Build Book Outline (JSON)</button>
+        </div>
+        <div class="menu-subgroup">
+          <div class="menu-subtitle">Chapters</div>
+          <button id="draft-chapter-btn">Draft a Chapter From JSON Outline</button>
+          <button id="draft-whole-book1-btn">Draft Entire Book 1 Automatically</button>
+          <button id="edit-chapter-btn">Review / Edit a Chapter</button>
+        </div>
+        <div class="menu-subgroup">
+          <div class="menu-subtitle">Review & Audio</div>
+          <button id="review-book-btn">Book-Level Consistency Review</button>
+          <button id="tts-chapter-btn">Generate TTS for a Chapter</button>
+        </div>
+        <div class="menu-subgroup">
+          <div class="menu-subtitle">Sora / Video</div>
+          <button id="sora-stub-btn" style="margin-top:0;">(Stub) Sora / Video Generation</button>
+        </div>
+      </div>
+    </details>
   </div>
 
   <div id="main">
@@ -480,7 +664,11 @@
           <input type="file" id="canvas-upload-input" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
         </div>
       </div>
-      <textarea id="canvas-document" placeholder="Character sheet will appear here for collaborative editing..."></textarea>
+      <div
+        id="canvas-document"
+        contenteditable="true"
+        aria-label="Character sheet canvas"
+      ></div>
       <div id="canvas-chat-log"></div>
       <div id="canvas-input-row">
         <textarea id="canvas-user-prompt" placeholder="Ask the assistant to adjust this sheet..."></textarea>
@@ -489,76 +677,8 @@
     </div>
     <div id="terminal"></div>
     <div id="controls">
-      <div class="section-title" style="margin-top:0;">Project Controls</div>
-      <div id="controls-grid">
-        <div class="control-group">
-          <div class="control-group-title">Setup & Docs</div>
-          <button id="init-assistants-btn">Initialize / Recreate Assistants</button>
-
-          <div style="margin-top:6px;font-size:11px;">Upload documents to vector stores:</div>
-          <select id="doc-category-select">
-            <option value="characters">characters</option>
-            <option value="locations">locations</option>
-            <option value="relationships">relationships</option>
-            <option value="storyline">storyline</option>
-            <option value="history">history</option>
-            <option value="outlines">outlines</option>
-            <option value="drafts">drafts</option>
-          </select>
-          <input type="file" id="file-upload-input" multiple />
-          <button id="upload-docs-btn">Upload Docs for Category</button>
-          <button id="list-category-files-btn">List Files in Category</button>
-          <select id="category-file-select" style="margin-top:4px;width:100%;">
-            <option value="">(refresh to see files)</option>
-          </select>
-          <button id="refresh-category-files-btn">Refresh File List</button>
-          <button id="remove-category-file-btn">Remove File from Category</button>
-        </div>
-
-        <div class="control-group">
-          <div class="control-group-title">Characters</div>
-          <button id="scan-characters-btn">Scan for Other Characters</button>
-          <div style="margin-top:6px;font-size:11px;">Select or add a character:</div>
-          <select id="character-select">
-            <option value="">(none selected)</option>
-          </select>
-          <input type="text" id="character-name-input" placeholder="Character name" style="margin-top:4px;" />
-          <button id="set-character-btn">Select / Create Character</button>
-          <div style="margin-top:6px;font-size:11px;">Current: <span id="current-character-name">None</span></div>
-          <button id="work-character-sheet-btn" style="margin-top:6px;">Work on Character Sheet</button>
-          <div style="margin-top:6px;font-size:11px;">Photo (jpeg/png):</div>
-          <input type="file" id="character-photo-input" accept="image/jpeg,image/png" />
-          <button id="character-photo-btn">Review / Edit Photos</button>
-        </div>
-
-        <div class="control-group">
-          <div class="control-group-title">Outlines</div>
-          <button id="build-trilogy-outline-btn">Build Trilogy Outline (Markdown)</button>
-          <button id="build-book-outline-btn">Build Book Outline (JSON)</button>
-        </div>
-
-        <div class="control-group">
-          <div class="control-group-title">Chapters</div>
-          <button id="draft-chapter-btn">Draft a Chapter From JSON Outline</button>
-          <button id="draft-whole-book1-btn">Draft Entire Book 1 Automatically</button>
-          <button id="edit-chapter-btn">Review / Edit a Chapter</button>
-        </div>
-
-        <div class="control-group">
-          <div class="control-group-title">Review & Audio</div>
-          <button id="review-book-btn">Book-Level Consistency Review</button>
-          <button id="tts-chapter-btn">Generate TTS for a Chapter</button>
-        </div>
-
-        <div class="control-group">
-          <div class="control-group-title">Sora / Video</div>
-          <button id="sora-stub-btn">(Stub) Sora / Video Generation</button>
-        </div>
-      </div>
-
-      <div id="status-bar">
-        Ready.
-      </div>
+      <div class="section-title" style="margin-top:0;">Status</div>
+      <div id="status-bar">Ready.</div>
     </div>
   </div>
 </div>
@@ -635,6 +755,29 @@
 
   function setStatus(message) {
     $("#status-bar").text(message);
+  }
+
+  function fetchWithTimeout(url, options, label = "request") {
+    const controller = new AbortController();
+    const merged = { ...options, signal: controller.signal };
+    logLine(`Sending ${label}...`);
+    const waitInterval = setInterval(() => logLine(`Waiting on ${label}...`), 15000);
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      logLine(`${label} timed out after 5 minutes.`, true);
+    }, 300000);
+    return fetch(url, merged)
+      .then((res) => {
+        clearInterval(waitInterval);
+        clearTimeout(timeoutId);
+        logLine(`${label} response received.`);
+        return res;
+      })
+      .catch((err) => {
+        clearInterval(waitInterval);
+        clearTimeout(timeoutId);
+        throw err;
+      });
   }
 
   function loadProjectsFromStorage() {
@@ -748,7 +891,7 @@
     const $sel = $("#character-select");
     $sel.empty();
     $sel.append($("<option>").val("").text("(none selected)"));
-    const names = Object.keys(project?.characters || {}).sort();
+    const names = Object.keys(project?.characters || {}).sort((a, b) => b.localeCompare(a));
     names.forEach((name) => {
       const opt = $("<option>").val(name).text(name);
       if (name === currentCharacterName) {
@@ -783,6 +926,10 @@
     $("#current-project-name").text(name);
     currentCharacterName = null;
     refreshCharacterSelectUI(projects[name]);
+    refreshCharacterRoster(projects[name], true).catch((e) => {
+      logLine("Could not refresh character roster: " + e.message, true);
+    });
+    refreshStoryTargetSelectors(projects[name], true);
     logLine("Switched to project: " + name);
     setStatus("Project " + name + " loaded.");
   }
@@ -807,7 +954,7 @@
     return true;
   }
 
-  async function openaiJson(path, method = "POST", body = null, useAssistantsBeta = false) {
+  async function openaiJson(path, method = "POST", body = null, useAssistantsBeta = false, label = null) {
     if (!requireApiKey()) throw new Error("No API key");
     const headers = {
       "Authorization": "Bearer " + apiKey,
@@ -816,11 +963,12 @@
     if (useAssistantsBeta) {
       headers["OpenAI-Beta"] = "assistants=v2";
     }
-    const res = await fetch("https://api.openai.com/v1" + path, {
+    const requestLabel = label || `OpenAI ${method} ${path}`;
+    const res = await fetchWithTimeout("https://api.openai.com/v1" + path, {
       method: method,
       headers: headers,
       body: body ? JSON.stringify(body) : null,
-    });
+    }, requestLabel);
     if (!res.ok) {
       const text = await res.text();
       throw new Error("OpenAI API error (" + res.status + "): " + text);
@@ -828,7 +976,7 @@
     return await res.json();
   }
 
-  async function openaiFormData(path, formData, useAssistantsBeta = false) {
+  async function openaiFormData(path, formData, useAssistantsBeta = false, label = null) {
     if (!requireApiKey()) throw new Error("No API key");
     const headers = {
       "Authorization": "Bearer " + apiKey,
@@ -836,11 +984,12 @@
     if (useAssistantsBeta) {
       headers["OpenAI-Beta"] = "assistants=v2";
     }
-    const res = await fetch("https://api.openai.com/v1" + path, {
+    const requestLabel = label || `OpenAI POST ${path}`;
+    const res = await fetchWithTimeout("https://api.openai.com/v1" + path, {
       method: "POST",
       headers: headers, // don't set Content-Type manually; browser will
       body: formData,
-    });
+    }, requestLabel);
     if (!res.ok) {
       const text = await res.text();
       throw new Error("OpenAI API error (" + res.status + "): " + text);
@@ -848,17 +997,18 @@
     return await res.json();
   }
 
-  async function openaiAudio(path, body) {
+  async function openaiAudio(path, body, label = null) {
     if (!requireApiKey()) throw new Error("No API key");
     const headers = {
       "Authorization": "Bearer " + apiKey,
       "Content-Type": "application/json",
     };
-    const res = await fetch("https://api.openai.com/v1" + path, {
+    const requestLabel = label || `OpenAI audio POST ${path}`;
+    const res = await fetchWithTimeout("https://api.openai.com/v1" + path, {
       method: "POST",
       headers: headers,
       body: JSON.stringify(body),
-    });
+    }, requestLabel);
     if (!res.ok) {
       const text = await res.text();
       throw new Error("OpenAI Audio API error (" + res.status + "): " + text);
@@ -884,6 +1034,7 @@
   async function runAssistantOnce(assistantId, userText) {
     // Use combined thread+run creation endpoint:
     // POST /v1/threads/runs with {assistant_id, thread: {messages:[...]}}
+    logLine("Preparing assistant run " + assistantId + "...");
     const body = {
       assistant_id: assistantId,
       thread: {
@@ -895,29 +1046,52 @@
         ],
       },
     };
-    const runObj = await openaiJson("/threads/runs", "POST", body, true);
+    const runObj = await openaiJson("/threads/runs", "POST", body, true, `assistant run ${assistantId}`);
     const threadId = runObj.thread_id;
     const runId = runObj.id;
+
+    const waitInterval = setInterval(() => logLine(`Waiting on assistant ${assistantId}...`), 15000);
+    const waitTimeout = setTimeout(() => {
+      logLine(`Assistant ${assistantId} run exceeded 5 minutes; aborting.`, true);
+    }, 300000);
 
     // Poll run until completed
     let attempts = 0;
     while (true) {
       attempts++;
-      const run = await openaiJson(`/threads/${threadId}/runs/${runId}`, "GET", null, true);
+      const run = await openaiJson(
+        `/threads/${threadId}/runs/${runId}`,
+        "GET",
+        null,
+        true,
+        `assistant status ${assistantId}`
+      );
       if (run.status === "completed") {
         break;
       }
       if (["failed", "cancelled", "expired"].includes(run.status)) {
+        clearInterval(waitInterval);
+        clearTimeout(waitTimeout);
         throw new Error("Run ended with status: " + run.status);
       }
       if (attempts > 60) {
+        clearInterval(waitInterval);
+        clearTimeout(waitTimeout);
         throw new Error("Run polling timed out.");
       }
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
+    clearInterval(waitInterval);
+    clearTimeout(waitTimeout);
     // Retrieve messages
-    const msgs = await openaiJson(`/threads/${threadId}/messages?limit=20`, "GET", null, true);
+    const msgs = await openaiJson(
+      `/threads/${threadId}/messages?limit=20`,
+      "GET",
+      null,
+      true,
+      `assistant messages ${assistantId}`
+    );
     if (!msgs.data || msgs.data.length === 0) {
       return "";
     }
@@ -1173,13 +1347,93 @@ When asked about photos:
       return "";
     }
     setStatus("Running assistant: " + roleName);
+    logLine(`Starting assistant task '${roleName}'...`);
     const result = await runAssistantOnce(project.assistants[roleName], userText);
     setStatus("Assistant run complete: " + roleName);
+    logLine(`Assistant task '${roleName}' finished.`);
     return result;
   }
 
   function chapterKey(bookNumber, act, chapter) {
     return `book_${bookNumber}_act_${act}_chapter_${chapter}`;
+  }
+
+  function getAvailableBookNumbers(project) {
+    const keys = Object.keys(project?.outlines || {});
+    const numbers = keys
+      .filter((k) => k.startsWith("book_"))
+      .map((k) => parseInt(k.replace("book_", ""), 10))
+      .filter((n) => !Number.isNaN(n));
+    const unique = Array.from(new Set(numbers));
+    unique.sort((a, b) => a - b);
+    return unique;
+  }
+
+  function refreshStoryTargetSelectors(project, keepSelection = false) {
+    const books = getAvailableBookNumbers(project);
+    const prevBook = keepSelection ? $("#book-select").val() : "";
+    const prevAct = keepSelection ? $("#act-select").val() : "";
+    const prevChapter = keepSelection ? $("#chapter-select").val() : "";
+
+    const $book = $("#book-select");
+    $book.empty();
+    $book.append($("<option>").attr("value", "").text("Select book"));
+    if (books.length === 0) {
+      $book.append($("<option>").attr("value", "1").text("Book 1 (start new)"));
+    } else {
+      books.forEach((n) => {
+        $book.append($("<option>").attr("value", n).text(`Book ${n}`));
+      });
+      $book.val(prevBook && books.includes(parseInt(prevBook, 10)) ? prevBook : books[0]);
+    }
+
+    populateActsForSelectedBook(project, prevAct, prevChapter);
+  }
+
+  function populateActsForSelectedBook(project, prevAct = "", prevChapter = "") {
+    const selectedBook = $("#book-select").val();
+    const $act = $("#act-select");
+    const $chapter = $("#chapter-select");
+    $act.empty();
+    $chapter.empty();
+    $act.append($("<option>").attr("value", "").text("Act"));
+    $chapter.append($("<option>").attr("value", "").text("Chapter"));
+    if (!selectedBook) return;
+    const projectObj = getCurrentProject();
+    const outline = projectObj?.outlines?.[`book_${selectedBook}`]?.json;
+    if (!outline) return;
+    const acts = (outline.acts || []).map((a) => String(a.act_number));
+    const uniqueActs = Array.from(new Set(acts));
+    uniqueActs.forEach((act) => {
+      $act.append($("<option>").attr("value", act).text(`Act ${act}`));
+    });
+    $act.val(uniqueActs.includes(prevAct) ? prevAct : uniqueActs[0]);
+    populateChaptersForSelectedAct(projectObj, prevChapter);
+  }
+
+  function populateChaptersForSelectedAct(project, prevChapter = "") {
+    const selectedBook = $("#book-select").val();
+    const selectedAct = $("#act-select").val();
+    const $chapter = $("#chapter-select");
+    $chapter.empty();
+    $chapter.append($("<option>").attr("value", "").text("Chapter"));
+    if (!selectedBook || !selectedAct) return;
+    const outline = project?.outlines?.[`book_${selectedBook}`]?.json;
+    if (!outline) return;
+    const actObj = (outline.acts || []).find((a) => String(a.act_number) === String(selectedAct));
+    const chapters = (actObj?.chapters || []).map((c) => String(c.chapter_number));
+    chapters.forEach((ch) => $chapter.append($("<option>").attr("value", ch).text(`Ch ${ch}`)));
+    if (chapters.length) {
+      $chapter.val(chapters.includes(prevChapter) ? prevChapter : chapters[0]);
+    }
+  }
+
+  function getSelectedBookActChapter(project) {
+    const bookVal = $("#book-select").val();
+    const actVal = $("#act-select").val();
+    const chapterVal = $("#chapter-select").val();
+    const bookNumber = bookVal ? parseInt(bookVal, 10) : getAvailableBookNumbers(project)[0] || 1;
+    return { bookNumber, act: actVal, chapterNum: chapterVal };
   }
 
   // ==============================
@@ -1194,6 +1448,167 @@ When asked about photos:
     if (currentCharacterName) return currentCharacterName;
     const names = Object.keys(project?.characters || {});
     return names[0] || null;
+  }
+
+  function deriveCharacterNameFromFilename(filename) {
+    if (!filename) return null;
+    const noExt = filename.replace(/\.[^/.]+$/, "");
+    const cleaned = noExt.replace(/character\s*sheet/i, "");
+    const words = cleaned.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+    return words || null;
+  }
+
+  function renderCharacterRoster(roster) {
+    const $list = $("#character-roster-list");
+    $list.empty();
+    if (!roster.length) {
+      $list.text("(no character files yet)");
+      return;
+    }
+    roster
+      .sort((a, b) => b.name.localeCompare(a.name))
+      .forEach((entry) => {
+        const label = entry.filename ? `${entry.name} — ${entry.filename}` : entry.name;
+        $list.append($("<div>").addClass("roster-row").text(label));
+      });
+  }
+
+  async function refreshCharacterRoster(project, silent = false) {
+    const vsId = project.vectorStores && project.vectorStores["characters"];
+    if (!vsId) {
+      renderCharacterRoster([]);
+      if (!silent) {
+        logLine("No character vector store yet. Upload or save a character sheet to create one.");
+      }
+      return [];
+    }
+
+    const res = await listVectorStoreFiles(vsId);
+    const roster = [];
+    for (const item of res.data || []) {
+      let filename = item.id;
+      try {
+        const meta = await retrieveOpenAIFile(item.id);
+        filename = meta.filename || filename;
+      } catch (e) {
+        // ignore metadata fetch failures
+      }
+      const name = deriveCharacterNameFromFilename(filename);
+      if (!name) continue;
+      roster.push({ name, filename, fileId: item.id });
+      const record = ensureCharacterRecord(project, name);
+      record.sheet = record.sheet || {};
+      record.sheet.filename = record.sheet.filename || filename;
+      record.sheet.fileId = record.sheet.fileId || item.id;
+      record.sheet.ext = record.sheet.ext || (filename.split(".").pop() || "txt").toLowerCase();
+    }
+
+    renderCharacterRoster(roster);
+    saveProjectsToStorage();
+    refreshCharacterSelectUI(project);
+    if (!silent) {
+      logLine(`Character roster refreshed from file names (${roster.length} found).`);
+    }
+    return roster;
+  }
+
+  function getCanvasText() {
+    return $("#canvas-document").text().trim();
+  }
+
+  function setCanvasText(text) {
+    $("#canvas-document").text(text || "");
+  }
+
+  function pushCanvasMessage(role, text) {
+    if (!text) return;
+    const $log = $("#canvas-chat-log");
+    const $msg = $("<div>").addClass("canvas-msg");
+    $msg.append($("<div>").addClass("role").text(role.toUpperCase()));
+    $msg.append($("<div>").text(text));
+    $log.append($msg);
+    $log.scrollTop($log[0].scrollHeight);
+  }
+
+  function renderCharacterGallery(record) {
+    const $track = $("#canvas-gallery-track");
+    $track.empty();
+    const photos = record?.photos || [];
+    if (!photos.length) {
+      refreshPhotoTargetSelect(record);
+      $track.append($("<div>").addClass("canvas-gallery-empty").text("No character images yet."));
+      return;
+    }
+    photos.forEach((photo, idx) => {
+      const $thumb = $("<div>").addClass("canvas-thumb");
+      if (photo.dataUrl) {
+        $thumb.append($("<img>").attr("src", photo.dataUrl));
+      } else {
+        $thumb.text("No preview available");
+      }
+      const label = photo.filename || `Photo ${idx + 1}`;
+      $thumb.append($("<div>").addClass("thumb-label").text(label));
+      $track.append($thumb);
+    });
+    refreshPhotoTargetSelect(record);
+  }
+
+  function openCharacterCanvas(name, record) {
+    $("#canvas-character-name").text(name || "None");
+    $("#character-canvas").addClass("visible");
+    if (record?.sheet?.ext) {
+      $("#canvas-ext-select").val(record.sheet.ext);
+    }
+    if (record?.sheet?.text) {
+      setCanvasText(record.sheet.text);
+    } else if (!getCanvasText()) {
+      setCanvasText("Character sheet will appear here for collaborative editing...");
+    }
+    renderCharacterGallery(record || {});
+  }
+
+  async function persistCharacterSheet(project, record, name, text, ext) {
+    const vsId = await ensureVectorStore(project, "characters");
+    const filename = `${name} Character Sheet.${ext}`;
+    const blob = new Blob([text], { type: "text/plain" });
+    const file = new File([blob], filename, { type: "text/plain" });
+
+    if (record.sheet?.fileId) {
+      try {
+        await deleteVectorStoreFile(vsId, record.sheet.fileId);
+        await deleteOpenAIFile(record.sheet.fileId);
+      } catch (e) {
+        logLine("Failed to remove old sheet file: " + e.message, true);
+      }
+    }
+
+    const uploadRes = await uploadFileToOpenAI(file);
+    await attachFileToVectorStore(vsId, uploadRes.id);
+
+    record.sheet = {
+      fileId: uploadRes.id,
+      filename,
+      ext,
+      text,
+    };
+    saveProjectsToStorage();
+    refreshCharacterRoster(project, true).catch(() => {});
+    logLine(`Saved character sheet for ${name}: ${filename} (fileId: ${uploadRes.id})`);
+    return uploadRes;
+  }
+
+  async function downloadCharacterSheetDocx(name, text) {
+    const blob = new Blob([text || ""], {
+      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name} Character Sheet.docx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   async function scanForOtherCharacters(project) {
@@ -1217,6 +1632,7 @@ Return a short bullet list with: character name, why they matter, and a suggeste
   }
 
   async function workOnCharacterSheet(project) {
+    await refreshCharacterRoster(project, true);
     const name = getActiveCharacterName(project);
     if (!name) {
       alert("Select or enter a character first.");
@@ -1224,6 +1640,13 @@ Return a short bullet list with: character name, why they matter, and a suggeste
     }
     const record = ensureCharacterRecord(project, name);
     setCurrentCharacter(project, name);
+    openCharacterCanvas(name, record);
+    if (record.sheet?.text) {
+      setCanvasText(record.sheet.text);
+    }
+    const currentExt = record.sheet?.ext || $("#canvas-ext-select").val() || "txt";
+    $("#canvas-ext-select").val(currentExt);
+    const existingSheet = getCanvasText() || record.sheet?.text || "";
 
     const userGoal =
       prompt(
@@ -1231,7 +1654,9 @@ Return a short bullet list with: character name, why they matter, and a suggeste
         record?.sheet?.text ? "Tighten and expand the current sheet." : "Draft a new character sheet."
       ) || "Draft or refine the character sheet.";
 
-    const extInput = (prompt("Save as txt or docx?", record?.sheet?.ext || "txt") || "txt").toLowerCase();
+    pushCanvasMessage("user", userGoal);
+
+    const extInput = (prompt("Save as txt or docx?", currentExt) || "txt").toLowerCase();
     const ext = extInput === "docx" ? "docx" : "txt";
 
     const promptText = `
@@ -1239,7 +1664,7 @@ Update the character sheet for ${name}.
 File naming must follow "${name} Character Sheet.${ext}".
 
 Existing sheet (if any):
-${record?.sheet?.text || "(none yet)"}
+${existingSheet || "(none yet)"}
 
 User request:
 ${userGoal}
@@ -1253,45 +1678,81 @@ Return the full updated sheet text ready to save.
       return;
     }
 
-    if (!confirm("Replace the stored character sheet with the assistant's version?")) {
+    record.sheet = record.sheet || {};
+    record.sheet.ext = ext;
+    record.sheet.text = newText;
+    setCanvasText(newText);
+    pushCanvasMessage("assistant", newText);
+    await persistCharacterSheet(project, record, name, newText, ext);
+  }
+
+  async function sendCharacterCanvasPrompt(project) {
+    const name = currentCharacterName || getActiveCharacterName(project);
+    if (!name) {
+      alert("Select or enter a character first.");
       return;
     }
-
-    const vsId = await ensureVectorStore(project, "characters");
-    const filename = `${name} Character Sheet.${ext}`;
-    const blob = new Blob([newText], { type: "text/plain" });
-    const file = new File([blob], filename, { type: "text/plain" });
-
-    if (record.sheet?.fileId) {
-      try {
-        await deleteVectorStoreFile(vsId, record.sheet.fileId);
-        await deleteOpenAIFile(record.sheet.fileId);
-      } catch (e) {
-        logLine("Failed to remove old sheet file: " + e.message, true);
-      }
+    const record = ensureCharacterRecord(project, name);
+    setCurrentCharacter(project, name);
+    openCharacterCanvas(name, record);
+    const userPrompt = $("#canvas-user-prompt").val().trim();
+    if (!userPrompt) {
+      alert("Add a request before sending to the assistant.");
+      return;
     }
+    pushCanvasMessage("user", userPrompt);
+    $("#canvas-user-prompt").val("");
+    const currentSheet = getCanvasText() || record.sheet?.text || "";
+    const promptText = `
+You are refining the character sheet for ${name}.
+Current sheet:
+${currentSheet}
 
-    const uploadRes = await uploadFileToOpenAI(file);
-    await attachFileToVectorStore(vsId, uploadRes.id);
+User request:
+${userPrompt}
 
-    record.sheet = {
-      fileId: uploadRes.id,
-      filename,
-      ext,
-      text: newText,
-    };
-
+Return the full updated sheet text only.
+`.trim();
+    const newText = await runProjectAssistant(project, "CharacterDesigner", promptText);
+    if (!newText) {
+      logLine("Assistant returned no updates for the canvas.", true);
+      return;
+    }
+    record.sheet = record.sheet || {};
+    record.sheet.text = newText;
+    record.sheet.ext = record.sheet.ext || $("#canvas-ext-select").val() || "txt";
+    setCanvasText(newText);
+    pushCanvasMessage("assistant", newText);
     saveProjectsToStorage();
-    logLine(`Saved character sheet for ${name}: ${filename} (fileId: ${uploadRes.id})`);
+  }
 
-    const dlUrl = URL.createObjectURL(blob);
-    const $link = $("<a>")
-      .addClass("download-link")
-      .attr("href", dlUrl)
-      .attr("download", filename)
-      .text(`Download ${filename}`);
-    logLine("Click to download character sheet: ");
-    $("#terminal").append($link).append("<br/>");
+  async function saveCanvasCharacterSheet(project) {
+    const name = currentCharacterName || getActiveCharacterName(project);
+    if (!name) {
+      alert("Select a character first.");
+      return;
+    }
+    const record = ensureCharacterRecord(project, name);
+    const ext = $("#canvas-ext-select").val() || record.sheet?.ext || "txt";
+    const text = getCanvasText();
+    await persistCharacterSheet(project, record, name, text, ext);
+  }
+
+  async function replaceCharacterSheetFromUpload(project, file) {
+    const inferredName = deriveCharacterNameFromFilename(file.name);
+    const name = inferredName || currentCharacterName || getActiveCharacterName(project);
+    if (!name) {
+      alert("Name the character before uploading a sheet.");
+      return;
+    }
+    const record = ensureCharacterRecord(project, name);
+    setCurrentCharacter(project, name);
+    const text = await file.text();
+    const ext = (file.name.split(".").pop() || "txt").toLowerCase();
+    $("#canvas-ext-select").val(ext);
+    setCanvasText(text);
+    openCharacterCanvas(name, record);
+    await persistCharacterSheet(project, record, name, text, ext);
   }
 
   function describeCharacterPhotos(record) {
@@ -1299,6 +1760,19 @@ Return the full updated sheet text ready to save.
     return record.photos
       .map((p, idx) => `${idx + 1}. ${p.filename} [${p.type === "profile" ? "profile" : "gallery"}]`)
       .join("\n");
+  }
+
+  function refreshPhotoTargetSelect(record) {
+    const $target = $("#photo-target-select");
+    $target.empty();
+    $target.append($("<option>").attr("value", "").text("(choose existing)"));
+    (record?.photos || []).forEach((p, idx) => {
+      const label = `${idx + 1}: ${p.filename || "photo"} (${p.type || "gallery"})`;
+      $target.append($("<option>").attr("value", idx).text(label));
+    });
+    if (!(record?.photos || []).length) {
+      $target.append($("<option>").attr("value", "none").text("(no stored photos)"));
+    }
   }
 
   async function reviewOrEditCharacterPhotos(project) {
@@ -1313,12 +1787,9 @@ Return the full updated sheet text ready to save.
     const summary = describeCharacterPhotos(record);
     logLine(`Current photos for ${name}:\n${summary}`);
 
-    const mode =
-      prompt(
-        `Choose photo action for ${name} (profile/add/edit):\n${summary}`,
-        record.photos.length ? "edit" : "profile"
-      ) || "";
-    const modeLower = mode.toLowerCase();
+    record.photos = record.photos || [];
+    refreshPhotoTargetSelect(record);
+    const modeLower = ($("#photo-action-select").val() || "").toLowerCase();
     if (!modeLower) return;
 
     const fileInput = document.getElementById("character-photo-input");
@@ -1326,9 +1797,12 @@ Return the full updated sheet text ready to save.
     let targetPhoto = null;
 
     if (modeLower.startsWith("edit")) {
-      const idxStr = prompt("Which photo number to edit?", "1");
-      const idx = Math.max(0, (parseInt(idxStr || "1", 10) || 1) - 1);
-      targetPhoto = record.photos[idx];
+      const idx = parseInt($("#photo-target-select").val(), 10);
+      targetPhoto = record.photos[idx] || null;
+      if (!targetPhoto) {
+        alert("Choose a stored photo to edit.");
+        return;
+      }
     } else if (modeLower.includes("profile")) {
       targetPhoto = record.photos.find((p) => p.type === "profile") || null;
     }
@@ -1392,6 +1866,10 @@ Return the full updated sheet text ready to save.
     saveProjectsToStorage();
     logLine(`Saved ${isProfile ? "profile" : "gallery"} image for ${name}: ${filename} (fileId: ${uploadRes.id})`);
     if (fileInput) fileInput.value = "";
+    if ($("#character-canvas").hasClass("visible") && currentCharacterName === name) {
+      renderCharacterGallery(record);
+    }
+    refreshPhotoTargetSelect(record);
   }
 
   // ==============================
@@ -1435,8 +1913,7 @@ Structure your answer like:
   }
 
   async function buildBookOutline(project) {
-    const bookNumberStr = prompt("Which book number? (e.g. 1, 2, 3)", "1");
-    const bookNumber = parseInt(bookNumberStr || "1", 10) || 1;
+    const { bookNumber } = getSelectedBookActChapter(project);
 
     const promptText = `
 Using the trilogy outline (if available) and all project lore:
@@ -1481,6 +1958,7 @@ Using the trilogy outline (if available) and all project lore:
       json: outlineJson,
     };
     saveProjectsToStorage();
+    refreshStoryTargetSelectors(project, true);
     logLine("Book " + bookNumber + " outline stored and uploaded. FileId: " + fileRes.id);
 
     const dlBlob = new Blob([JSON.stringify(outlineJson, null, 2)], { type: "application/json" });
@@ -1495,10 +1973,15 @@ Using the trilogy outline (if available) and all project lore:
   }
 
   async function draftChapter(project) {
-    const bookStr = prompt("Book number (e.g. 1):", "1");
-    const bookNumber = parseInt(bookStr || "1", 10) || 1;
-    const act = prompt("Act (e.g. 1, 2, 3):", "1") || "1";
-    const chapterNum = prompt("Chapter number (e.g. 1, 2, 3):", "1") || "1";
+    const { bookNumber, act, chapterNum } = getSelectedBookActChapter(project);
+    if (!bookNumber) {
+      alert("Select a book in Story Targets first.");
+      return;
+    }
+    if (!act || !chapterNum) {
+      alert("Choose an act and chapter in Story Targets before drafting.");
+      return;
+    }
 
     project.outlines = project.outlines || {};
     const outlineEntry = project.outlines["book_" + bookNumber];
@@ -1702,10 +2185,11 @@ Please write the full chapter now, following your system-level drafting rules.
   }
 
   async function editChapter(project) {
-    const bookStr = prompt("Book number (e.g. 1):", "1");
-    const bookNumber = parseInt(bookStr || "1", 10) || 1;
-    const act = prompt("Act (e.g. 1, 2, 3):", "1") || "1";
-    const chapterNum = prompt("Chapter number:", "1") || "1";
+    const { bookNumber, act, chapterNum } = getSelectedBookActChapter(project);
+    if (!bookNumber || !act || !chapterNum) {
+      alert("Select book, act, and chapter in Story Targets before editing.");
+      return;
+    }
 
     project.chapters = project.chapters || {};
     const key = chapterKey(bookNumber, act, chapterNum);
@@ -1807,8 +2291,11 @@ CORRECTED CHAPTER:
   }
 
   async function reviewWholeBook(project) {
-    const bookStr = prompt("Which book number to review? (e.g. 1):", "1");
-    const bookNumber = parseInt(bookStr || "1", 10) || 1;
+    const { bookNumber } = getSelectedBookActChapter(project);
+    if (!bookNumber) {
+      alert("Select a book in Story Targets first.");
+      return;
+    }
 
     project.chapters = project.chapters || {};
     const keys = Object.keys(project.chapters).filter((k) =>
@@ -1869,10 +2356,11 @@ Please:
   }
 
   async function ttsForChapter(project) {
-    const bookStr = prompt("Book number (for lookup in stored text, e.g. 1):", "1");
-    const bookNumber = parseInt(bookStr || "1", 10) || 1;
-    const act = prompt("Act:", "1") || "1";
-    const chapterNum = prompt("Chapter:", "1") || "1";
+    const { bookNumber, act, chapterNum } = getSelectedBookActChapter(project);
+    if (!bookNumber || !act || !chapterNum) {
+      alert("Pick book, act, and chapter in Story Targets first.");
+      return;
+    }
 
     project.chapters = project.chapters || {};
     const key = chapterKey(bookNumber, act, chapterNum);
@@ -2081,6 +2569,8 @@ Please:
     refreshProjectListUI();
     const initialProject = currentProjectName && projects[currentProjectName] ? projects[currentProjectName] : { characters: {} };
     refreshCharacterSelectUI(initialProject);
+    refreshCharacterRoster(initialProject, true);
+    refreshStoryTargetSelectors(initialProject, true);
     setConsoleExpanded(false);
     $("#api-key-input").val(apiKey);
     $("#api-key-status").text("Preloaded test key (change as needed)");
@@ -2100,6 +2590,16 @@ Please:
     $("#console-toggle-btn").on("click", function (e) {
       e.stopPropagation();
       setConsoleExpanded(!consoleExpanded);
+    });
+
+    $("#canvas-gallery-prev").on("click", function () {
+      const track = document.getElementById("canvas-gallery-track");
+      if (track) track.scrollBy({ left: -140, behavior: "smooth" });
+    });
+
+    $("#canvas-gallery-next").on("click", function () {
+      const track = document.getElementById("canvas-gallery-track");
+      if (track) track.scrollBy({ left: 140, behavior: "smooth" });
     });
 
     $("#set-api-key-btn").on("click", function () {
@@ -2172,6 +2672,16 @@ Please:
       ensureCharacterRecord(project, name);
       saveProjectsToStorage();
       setCurrentCharacter(project, name);
+    });
+
+    $("#refresh-characters-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await refreshCharacterRoster(project);
+      } catch (e) {
+        logLine("Error refreshing character roster: " + e.message, true);
+      }
     });
 
     $("#scan-characters-btn").on("click", async function () {
@@ -2278,7 +2788,7 @@ Please:
         alert("Select a character first.");
         return;
       }
-      const text = $("#canvas-document").val();
+      const text = getCanvasText();
       await downloadCharacterSheetDocx(name, text);
     });
 
@@ -2320,6 +2830,24 @@ Please:
       }
     });
 
+    $("#refresh-story-targets-btn").on("click", function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      refreshStoryTargetSelectors(project, true);
+    });
+
+    $("#book-select").on("change", function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      populateActsForSelectedBook(project);
+    });
+
+    $("#act-select").on("change", function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      populateChaptersForSelectedAct(project);
+    });
+
     $("#draft-chapter-btn").on("click", async function () {
       const project = getCurrentProject();
       if (!project) return;
@@ -2333,13 +2861,22 @@ Please:
     $("#draft-whole-book1-btn").on("click", async function () {
       const project = getCurrentProject();
       if (!project) return;
-      if (!confirm("Draft entire Book 1 from its JSON outline? This may use many tokens.")) {
+      const { bookNumber } = getSelectedBookActChapter(project);
+      if (!bookNumber) {
+        alert("Select a book in Story Targets first.");
+        return;
+      }
+      if (
+        !confirm(
+          `Draft entire Book ${bookNumber} from its JSON outline? This may use many tokens and time to complete.`
+        )
+      ) {
         return;
       }
       try {
-        await draftWholeBook(project, 1);
+        await draftWholeBook(project, bookNumber);
       } catch (e) {
-        logLine("Error drafting whole Book 1: " + e.message, true);
+        logLine(`Error drafting whole Book ${bookNumber}: ` + e.message, true);
       }
     });
 
