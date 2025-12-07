@@ -942,6 +942,9 @@
         <button id="google-client-id-save-btn" class="small">Save client ID</button>
       </div>
       <div id="google-client-id-status" style="font-size:11px;color:#c5c6c7;margin-top:4px;"></div>
+      <div style="font-size:11px;color:#c5c6c7;margin-top:6px;line-height:1.5;">
+        This app signs <em>you</em> in with your own Google account, using a Google OAuth Web client ID that the host provides. If you're just using the app, you shouldn't have to generate anything—sign in normally. <strong>If you're self-hosting and this field is empty,</strong> create a Web OAuth client ID in <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" style="color:#66fcf1;">Google Cloud Console</a>, add this page's origin as an Authorized JavaScript origin, and paste the resulting Client ID here.
+      </div>
     </div>
     <div id="auth-status-text">Waiting for sign-in...</div>
   </div>
@@ -1288,7 +1291,9 @@
     const $status = $("#google-client-id-status");
     if (!$status.length) return;
     if (!googleClientId || googleClientId.includes("YOUR_")) {
-      $status.text("Client ID missing. Paste your Google OAuth client ID and save it.");
+      $status.text(
+        "Client ID missing. The host must supply a Google OAuth Web client ID; sign-in still uses your own Google account."
+      );
     } else {
       const tail = googleClientId.slice(-8);
       $status.text(`Using client ID ending with ...${tail}. Stored locally.`);
@@ -1429,7 +1434,9 @@
     }
     if (!googleClientId || googleClientId.includes("YOUR_")) {
       logLine("ensureDriveConfigPresent: GOOGLE_CLIENT_ID missing or placeholder.", true);
-      throw new Error("Set GOOGLE_CLIENT_ID to a valid OAuth client id for Google Drive.");
+      throw new Error(
+        "Google Drive sign-in needs GOOGLE_CLIENT_ID set by the app host (a Web OAuth client ID). You will sign in with your own Google account; if you're not hosting, ask the host to configure this."
+      );
     }
     logLine("ensureDriveConfigPresent: end");
   }
@@ -4965,13 +4972,17 @@ Please:
       logLine("Google sign-in button clicked.");
       const $btn = $(this);
       const previousLabel = $btn.text();
-      if (!googleDriveReady) {
-        logLine("Google sign-in blocked: SDK not ready.", true);
-        setAuthStatus("Google SDK is still loading. Please try again in a moment.");
-        return;
-      }
       $btn.prop("disabled", true).text("Signing in...");
       try {
+        if (!googleDriveReady) {
+          logLine("Google sign-in: SDK not ready, attempting to prepare now.");
+          setAuthStatus("Loading Google SDK...");
+          await prepareGoogleSdk();
+          if (!googleDriveReady) {
+            throw new Error("Google SDK is still not ready. Check your client ID and try again.");
+          }
+          logLine("Google sign-in: SDK prepared on-demand.");
+        }
         await bootstrapAfterGoogleAuth();
         logLine("Google sign-in flow completed.");
       } catch (e) {
