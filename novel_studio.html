@@ -1203,7 +1203,7 @@
 
 <div id="console-panel" class="collapsed">
   <div id="console-panel-header">
-    <span id="console-panel-title">Console (collapsed)</span>
+<span id="console-panel-title">Console (collapsed)</span>
     <button id="console-toggle-btn">Expand</button>
   </div>
   <div id="console-panel-body">
@@ -1246,8 +1246,7 @@
   let googleAuthorized = false;
   let googleDriveReady = false;
   let googleInitPromise = null;
-  let googleSdkLoadPromise = null;
-  let googleUserEmail = null;
+let googleUserEmail = null;
 
   function resetGoogleSdkState() {
     googleDriveReady = false;
@@ -1392,10 +1391,6 @@
       }
 
       let script = document.getElementById(id);
-      if (script?.dataset?.sdkState === "failed") {
-        script.remove();
-        script = null;
-      }
       const descriptor = src.includes("gsi") ? "Google Identity Services" : "Google API client";
 
       if (!script) {
@@ -1407,28 +1402,22 @@
         document.head.appendChild(script);
       }
 
-      script.dataset.sdkState = "loading";
-
       const timeout = setTimeout(() => {
-        script.dataset.sdkState = "failed";
         reject(new Error(`${descriptor} script timed out while loading.`));
       }, 15000);
 
       const onLoad = () => {
         clearTimeout(timeout);
         if (checkLoaded()) {
-          script.dataset.sdkState = "loaded";
           logLine(`${descriptor} script loaded.`);
           resolve();
         } else {
-          script.dataset.sdkState = "failed";
           reject(new Error(`${descriptor} loaded but global object is missing.`));
         }
       };
 
       const onError = () => {
         clearTimeout(timeout);
-        script.dataset.sdkState = "failed";
         reject(new Error(`${descriptor} script failed to load (network blocked or offline).`));
       };
 
@@ -1437,33 +1426,12 @@
     });
   }
 
-  async function loadGoogleSdkAssets() {
-    if (googleSdkLoadPromise) return googleSdkLoadPromise;
-    googleSdkLoadPromise = (async () => {
-      setAuthStatus("Loading Google SDK assets...");
-      logLine("Loading Google SDK assets...");
-      await Promise.all([
-        loadGoogleScript("google-gsi-script", "https://accounts.google.com/gsi/client", () => !!window.google?.accounts),
-        loadGoogleScript("google-gapi-script", "https://apis.google.com/js/api.js", () => !!window.gapi),
-      ]);
-      logLine("Google SDK assets downloaded. Initializing client...");
-    })().catch((err) => {
-      const message = err?.message || "Google SDK assets failed to load.";
-      logLine("Google SDK asset load failed: " + message, true);
-      setAuthStatus("Google sign-in unavailable: " + message);
-      googleSdkLoadPromise = null;
-      throw err;
-    });
-    return googleSdkLoadPromise;
-  }
-
   async function prepareGoogleSdk() {
     if (googleDriveReady) return;
     if (!googleInitPromise) {
       googleInitPromise = (async () => {
         ensureDriveConfigPresent();
-        await loadGoogleSdkAssets();
-        setAuthStatus("Initializing Google Drive client...");
+        await waitForGoogleSdk();
         await new Promise((resolve, reject) => {
           gapi.load("client", { callback: resolve, onerror: () => reject(new Error("Failed to load gapi client")) });
         });
@@ -1475,7 +1443,6 @@
         const message = err?.message || "Google SDK failed to load";
         logLine("Google SDK initialization failed: " + message, true);
         setAuthStatus("Google sign-in unavailable: " + message);
-        googleInitPromise = null;
         throw err;
       });
     }
@@ -4855,54 +4822,28 @@ Please:
     collapseAllMenuPanels();
 
     const $googleBtn = $("#google-auth-btn");
-    const $googleReloadBtn = $("#google-reload-btn");
-
-    async function kickOffGoogleSdk(forceReload = false) {
-      try {
-        ensureDriveConfigPresent();
-        setAuthStatus(forceReload ? "Reloading Google SDK assets..." : "Loading Google SDK assets...");
-        $googleBtn.prop("disabled", true).text("Loading Google SDK...");
-        if (forceReload) {
-          resetGoogleSdkState();
-          logLine("Forcing Google SDK reload after user request.");
-        }
-        await prepareGoogleSdk();
-        $googleBtn.prop("disabled", false).text("Sign in with Google Drive");
-        setAuthStatus("Google SDK ready. Sign in to continue.");
-      } catch (e) {
-        const reason = e?.message || "Google SDK failed to initialize.";
-        logLine(reason, true);
-        setAuthStatus("Google sign-in unavailable: " + reason);
-        $googleBtn.prop("disabled", false).text("Retry Google SDK load");
-      }
+    try {
+      ensureDriveConfigPresent();
+      $googleBtn.prop("disabled", true).text("Loading Google SDK...");
+      prepareGoogleSdk()
+        .then(() => {
+          $googleBtn.prop("disabled", false).text("Sign in with Google Drive");
+        })
+        .catch(() => {
+          $googleBtn.prop("disabled", true).text("Sign-in unavailable");
+        });
+    } catch (e) {
+      logLine(e.message, true);
+      setAuthStatus(e.message);
+      $googleBtn.prop("disabled", true).text("Sign-in unavailable");
     }
-
-    kickOffGoogleSdk();
-
-    $googleReloadBtn.on("click", async function () {
-      const previous = $(this).text();
-      $(this).prop("disabled", true).text("Reloading SDK...");
-      await kickOffGoogleSdk(true);
-      $(this).prop("disabled", false).text(previous);
-    });
 
     $googleBtn.on("click", async function () {
       const $btn = $(this);
       const previousLabel = $btn.text();
       if (!googleDriveReady) {
-        setAuthStatus("Google SDK is still loading. Retrying initialization...");
-        try {
-          await prepareGoogleSdk();
-        } catch (e) {
-          const reason = e?.message || "Google SDK failed to initialize.";
-          logLine("Google SDK initialization failed: " + reason, true);
-          setAuthStatus("Google sign-in unavailable: " + reason);
-          return;
-        }
-        if (!googleDriveReady) {
-          setAuthStatus("Google SDK is still loading. Please try again in a moment.");
-          return;
-        }
+        setAuthStatus("Google SDK is still loading. Please try again in a moment.");
+        return;
       }
       $btn.prop("disabled", true).text("Signing in...");
       try {
