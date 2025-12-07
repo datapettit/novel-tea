@@ -1242,6 +1242,7 @@
   let googleAccessToken = null;
   let googleAuthorized = false;
   let googleDriveReady = false;
+  let googleInitPromise = null;
   let googleUserEmail = null;
   let projects = {}; // { projectName: {name, assistants, vectorStores, outlines, chapters} }
   let currentProjectName = null;
@@ -1373,15 +1374,27 @@
     });
   }
 
-  async function initGoogleDriveClient() {
-    ensureDriveConfigPresent();
+  async function prepareGoogleSdk() {
     if (googleDriveReady) return;
-    await waitForGoogleSdk();
-    await new Promise((resolve, reject) => {
-      gapi.load("client", { callback: resolve, onerror: () => reject(new Error("Failed to load gapi client")) });
-    });
-    await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
-    googleDriveReady = true;
+    if (!googleInitPromise) {
+      googleInitPromise = (async () => {
+        ensureDriveConfigPresent();
+        await waitForGoogleSdk();
+        await new Promise((resolve, reject) => {
+          gapi.load("client", { callback: resolve, onerror: () => reject(new Error("Failed to load gapi client")) });
+        });
+        await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
+        googleDriveReady = true;
+        logLine("Google Drive SDK ready.");
+        setAuthStatus("Google SDK ready. Sign in to continue.");
+      })().catch((err) => {
+        const message = err?.message || "Google SDK failed to load";
+        logLine("Google SDK initialization failed: " + message, true);
+        setAuthStatus("Google sign-in unavailable: " + message);
+        throw err;
+      });
+    }
+    return googleInitPromise;
   }
 
   function initGoogleTokenClient() {
@@ -1396,7 +1409,12 @@
   }
 
   async function requestGoogleAuth(interactive = true) {
-    await initGoogleDriveClient();
+    if (!googleDriveReady) {
+      await prepareGoogleSdk();
+      if (!googleDriveReady) {
+        throw new Error("Google SDK is not ready yet.");
+      }
+    }
     initGoogleTokenClient();
     return new Promise((resolve, reject) => {
       googleTokenClient.callback = async (resp) => {
@@ -1405,15 +1423,15 @@
           reject(new Error(resp.error));
           return;
         }
-      googleAccessToken = resp.access_token;
-      googleAuthorized = true;
-      gapi.client.setToken({ access_token: googleAccessToken });
-      await fetchGoogleProfile();
-      setAuthStatus("Authorized. Loading Drive projects...");
-      resolve(resp);
-    };
-    googleTokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
-  });
+        googleAccessToken = resp.access_token;
+        googleAuthorized = true;
+        gapi.client.setToken({ access_token: googleAccessToken });
+        await fetchGoogleProfile();
+        setAuthStatus("Authorized. Loading Drive projects...");
+        resolve(resp);
+      };
+      googleTokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
+    });
   }
 
   async function ensureGoogleAuthorized() {
@@ -2245,84 +2263,86 @@
 
   async function runAssistantOnce(assistantId, userText) {
     beginLongLoading();
-    // Use combined thread+run creation endpoint:
-    // POST /v1/threads/runs with {assistant_id, thread: {messages:[...]}}
-    logLine("Preparing assistant run " + assistantId + "...");
-    const body = {
-      assistant_id: assistantId,
-      thread: {
-        messages: [
-          {
-            role: "user",
-            content: userText,
-          },
-        ],
-      },
-    };
-    const runObj = await openaiJson("/threads/runs", "POST", body, true, `assistant run ${assistantId}`);
-    const threadId = runObj.thread_id;
-    const runId = runObj.id;
+    try {
+      // Use combined thread+run creation endpoint:
+      // POST /v1/threads/runs with {assistant_id, thread: {messages:[...]}}
+      logLine("Preparing assistant run " + assistantId + "...");
+      const body = {
+        assistant_id: assistantId,
+        thread: {
+          messages: [
+            {
+              role: "user",
+              content: userText,
+            },
+          ],
+        },
+      };
+      const runObj = await openaiJson("/threads/runs", "POST", body, true, `assistant run ${assistantId}`);
+      const threadId = runObj.thread_id;
+      const runId = runObj.id;
 
-    const waitInterval = setInterval(() => logLine(`Waiting on assistant ${assistantId}...`), 15000);
-    const waitTimeout = setTimeout(() => {
-      logLine(`Assistant ${assistantId} run exceeded 5 minutes; aborting.`, true);
-    }, 300000);
+      const waitInterval = setInterval(() => logLine(`Waiting on assistant ${assistantId}...`), 15000);
+      const waitTimeout = setTimeout(() => {
+        logLine(`Assistant ${assistantId} run exceeded 5 minutes; aborting.`, true);
+      }, 300000);
 
-    // Poll run until completed
-    let attempts = 0;
-    while (true) {
-      attempts++;
-      const run = await openaiJson(
-        `/threads/${threadId}/runs/${runId}`,
+      // Poll run until completed
+      let attempts = 0;
+      while (true) {
+        attempts++;
+        const run = await openaiJson(
+          `/threads/${threadId}/runs/${runId}`,
+          "GET",
+          null,
+          true,
+          `assistant status ${assistantId}`
+        );
+        if (run.status === "completed") {
+          break;
+        }
+        if (["failed", "cancelled", "expired"].includes(run.status)) {
+          clearInterval(waitInterval);
+          clearTimeout(waitTimeout);
+          throw new Error("Run ended with status: " + run.status);
+        }
+        if (attempts > 60) {
+          clearInterval(waitInterval);
+          clearTimeout(waitTimeout);
+          throw new Error("Run polling timed out.");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      clearInterval(waitInterval);
+      clearTimeout(waitTimeout);
+      // Retrieve messages
+      const msgs = await openaiJson(
+        `/threads/${threadId}/messages?limit=20`,
         "GET",
         null,
         true,
-        `assistant status ${assistantId}`
+        `assistant messages ${assistantId}`
       );
-      if (run.status === "completed") {
-        break;
+      if (!msgs.data || msgs.data.length === 0) {
+        return "";
       }
-      if (["failed", "cancelled", "expired"].includes(run.status)) {
-        clearInterval(waitInterval);
-        clearTimeout(waitTimeout);
-        throw new Error("Run ended with status: " + run.status);
-      }
-      if (attempts > 60) {
-        clearInterval(waitInterval);
-        clearTimeout(waitTimeout);
-        throw new Error("Run polling timed out.");
-      }
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-
-    clearInterval(waitInterval);
-    clearTimeout(waitTimeout);
-    // Retrieve messages
-    const msgs = await openaiJson(
-      `/threads/${threadId}/messages?limit=20`,
-      "GET",
-      null,
-      true,
-      `assistant messages ${assistantId}`
-    );
-    if (!msgs.data || msgs.data.length === 0) {
-      return "";
-    }
-    // Find first assistant message
-    for (const msg of msgs.data) {
-      if (msg.role === "assistant") {
-        let textParts = [];
-        for (const c of msg.content || []) {
-          if (c.type === "text" && c.text && c.text.value) {
-            textParts.push(c.text.value);
+      // Find first assistant message
+      for (const msg of msgs.data) {
+        if (msg.role === "assistant") {
+          let textParts = [];
+          for (const c of msg.content || []) {
+            if (c.type === "text" && c.text && c.text.value) {
+              textParts.push(c.text.value);
+            }
           }
+          return textParts.join("\n").trim();
         }
-        return textParts.join("\\n").trim();
       }
+      return "";
+    } finally {
+      endLongLoading();
     }
-    return "";
-  } finally {
-    endLongLoading();
   }
 
   // ==============================
@@ -4749,17 +4769,30 @@ Please:
     setCharacterMode(characterConversationMode);
     collapseAllMenuPanels();
 
+    const $googleBtn = $("#google-auth-btn");
     try {
       ensureDriveConfigPresent();
+      $googleBtn.prop("disabled", true).text("Loading Google SDK...");
+      prepareGoogleSdk()
+        .then(() => {
+          $googleBtn.prop("disabled", false).text("Sign in with Google Drive");
+        })
+        .catch(() => {
+          $googleBtn.prop("disabled", true).text("Sign-in unavailable");
+        });
     } catch (e) {
       logLine(e.message, true);
       setAuthStatus(e.message);
-      $("#google-auth-btn").prop("disabled", true).text("Sign-in unavailable");
+      $googleBtn.prop("disabled", true).text("Sign-in unavailable");
     }
 
-    $("#google-auth-btn").on("click", async function () {
+    $googleBtn.on("click", async function () {
       const $btn = $(this);
       const previousLabel = $btn.text();
+      if (!googleDriveReady) {
+        setAuthStatus("Google SDK is still loading. Please try again in a moment.");
+        return;
+      }
       $btn.prop("disabled", true).text("Signing in...");
       try {
         await bootstrapAfterGoogleAuth();
