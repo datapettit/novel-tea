@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <title>Novel Studio – OpenAI HTML Client</title>
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="https://apis.google.com/js/api.js" async defer></script>
+  <script id="google-gsi-script" src="https://accounts.google.com/gsi/client" async defer></script>
+  <script id="google-gapi-script" src="https://apis.google.com/js/api.js" async defer></script>
   <style>
     body {
       margin: 0;
@@ -556,7 +556,7 @@
       border-top: 1px solid #1f2833;
       box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.4);
       font-size: 12px;
-      z-index: 10;
+      z-index: 70;
     }
     #console-panel-header {
       display: flex;
@@ -916,14 +916,17 @@
   </style>
 </head>
 <body>
-<div id="auth-overlay">
-  <div id="auth-card">
-    <h2>Connect Google Drive</h2>
-    <p>
-      Novel Studio now uses your Google Drive as the source of truth for all images and documents.
-      Sign in to grant Drive access before working with any projects.
-    </p>
-    <button id="google-auth-btn">Sign in with Google Drive</button>
+  <div id="auth-overlay">
+    <div id="auth-card">
+      <h2>Connect Google Drive</h2>
+      <p>
+        Novel Studio now uses your Google Drive as the source of truth for all images and documents.
+        Sign in to grant Drive access before working with any projects.
+      </p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <button id="google-auth-btn">Sign in with Google Drive</button>
+      <button id="google-reload-btn" class="small" style="background:#1f2833;color:#e5e5e5;">Force reload SDK</button>
+    </div>
     <div id="auth-status-text">Waiting for sign-in...</div>
   </div>
 </div>
@@ -1242,7 +1245,21 @@
   let googleAccessToken = null;
   let googleAuthorized = false;
   let googleDriveReady = false;
+  let googleInitPromise = null;
+  let googleSdkLoadPromise = null;
   let googleUserEmail = null;
+
+  function resetGoogleSdkState() {
+    googleDriveReady = false;
+    googleInitPromise = null;
+    googleSdkLoadPromise = null;
+    googleTokenClient = null;
+    ["google-gsi-script", "google-gapi-script"].forEach((id) => {
+      const existing = document.getElementById(id);
+      if (existing) existing.remove();
+    });
+    logLine("Google SDK state cleared. Reloading scripts is now allowed.");
+  }
   let projects = {}; // { projectName: {name, assistants, vectorStores, outlines, chapters} }
   let currentProjectName = null;
   let assistantModel = ASSISTANT_MODELS[0];
@@ -1259,6 +1276,8 @@
   let projectPickerSelection = null;
 
   const isFileOrigin = window.location.protocol === "file:";
+  const isLocalhostOrigin = ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
+  let loggedLocalhostHint = false;
 
   function fileToDataUrl(file) {
     return new Promise((resolve, reject) => {
@@ -1349,39 +1368,118 @@
         "Google OAuth blocks the file:// origin. Serve novel_studio.html from http(s) (e.g., `python3 -m http.server`) to sign in."
       );
     }
+    if (window.location.protocol === "http:" && !isLocalhostOrigin) {
+      throw new Error(
+        "Google OAuth requires HTTPS for non-local origins. Use https://, a tunnel (ngrok/localhost.run), or http://localhost with the origin whitelisted in your OAuth client."
+      );
+    }
+    if (isLocalhostOrigin && !loggedLocalhostHint) {
+      logLine(
+        `Running on ${window.location.origin}. Ensure this origin is added as an Authorized JavaScript origin on your Google OAuth client to allow localhost sign-in.`
+      );
+      loggedLocalhostHint = true;
+    }
     if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.includes("YOUR_")) {
       throw new Error("Set GOOGLE_CLIENT_ID to a valid OAuth client id for Google Drive.");
     }
   }
 
-  function waitForGoogleSdk() {
+  function loadGoogleScript(id, src, checkLoaded) {
     return new Promise((resolve, reject) => {
-      let attempts = 0;
-      function check() {
-        attempts += 1;
-        if (window.gapi && window.google) {
-          resolve();
-          return;
-        }
-        if (attempts > 200) {
-          reject(new Error("Google SDKs did not load."));
-          return;
-        }
-        setTimeout(check, 50);
+      if (checkLoaded()) {
+        resolve();
+        return;
       }
-      check();
+
+      let script = document.getElementById(id);
+      if (script?.dataset?.sdkState === "failed") {
+        script.remove();
+        script = null;
+      }
+      const descriptor = src.includes("gsi") ? "Google Identity Services" : "Google API client";
+
+      if (!script) {
+        script = document.createElement("script");
+        script.id = id;
+        script.src = src;
+        script.async = true;
+        script.defer = true;
+        document.head.appendChild(script);
+      }
+
+      script.dataset.sdkState = "loading";
+
+      const timeout = setTimeout(() => {
+        script.dataset.sdkState = "failed";
+        reject(new Error(`${descriptor} script timed out while loading.`));
+      }, 15000);
+
+      const onLoad = () => {
+        clearTimeout(timeout);
+        if (checkLoaded()) {
+          script.dataset.sdkState = "loaded";
+          logLine(`${descriptor} script loaded.`);
+          resolve();
+        } else {
+          script.dataset.sdkState = "failed";
+          reject(new Error(`${descriptor} loaded but global object is missing.`));
+        }
+      };
+
+      const onError = () => {
+        clearTimeout(timeout);
+        script.dataset.sdkState = "failed";
+        reject(new Error(`${descriptor} script failed to load (network blocked or offline).`));
+      };
+
+      script.addEventListener("load", onLoad, { once: true });
+      script.addEventListener("error", onError, { once: true });
     });
   }
 
-  async function initGoogleDriveClient() {
-    ensureDriveConfigPresent();
-    if (googleDriveReady) return;
-    await waitForGoogleSdk();
-    await new Promise((resolve, reject) => {
-      gapi.load("client", { callback: resolve, onerror: () => reject(new Error("Failed to load gapi client")) });
+  async function loadGoogleSdkAssets() {
+    if (googleSdkLoadPromise) return googleSdkLoadPromise;
+    googleSdkLoadPromise = (async () => {
+      setAuthStatus("Loading Google SDK assets...");
+      logLine("Loading Google SDK assets...");
+      await Promise.all([
+        loadGoogleScript("google-gsi-script", "https://accounts.google.com/gsi/client", () => !!window.google?.accounts),
+        loadGoogleScript("google-gapi-script", "https://apis.google.com/js/api.js", () => !!window.gapi),
+      ]);
+      logLine("Google SDK assets downloaded. Initializing client...");
+    })().catch((err) => {
+      const message = err?.message || "Google SDK assets failed to load.";
+      logLine("Google SDK asset load failed: " + message, true);
+      setAuthStatus("Google sign-in unavailable: " + message);
+      googleSdkLoadPromise = null;
+      throw err;
     });
-    await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
-    googleDriveReady = true;
+    return googleSdkLoadPromise;
+  }
+
+  async function prepareGoogleSdk() {
+    if (googleDriveReady) return;
+    if (!googleInitPromise) {
+      googleInitPromise = (async () => {
+        ensureDriveConfigPresent();
+        await loadGoogleSdkAssets();
+        setAuthStatus("Initializing Google Drive client...");
+        await new Promise((resolve, reject) => {
+          gapi.load("client", { callback: resolve, onerror: () => reject(new Error("Failed to load gapi client")) });
+        });
+        await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
+        googleDriveReady = true;
+        logLine("Google Drive SDK ready.");
+        setAuthStatus("Google SDK ready. Sign in to continue.");
+      })().catch((err) => {
+        const message = err?.message || "Google SDK failed to load";
+        logLine("Google SDK initialization failed: " + message, true);
+        setAuthStatus("Google sign-in unavailable: " + message);
+        googleInitPromise = null;
+        throw err;
+      });
+    }
+    return googleInitPromise;
   }
 
   function initGoogleTokenClient() {
@@ -1396,7 +1494,12 @@
   }
 
   async function requestGoogleAuth(interactive = true) {
-    await initGoogleDriveClient();
+    if (!googleDriveReady) {
+      await prepareGoogleSdk();
+      if (!googleDriveReady) {
+        throw new Error("Google SDK is not ready yet.");
+      }
+    }
     initGoogleTokenClient();
     return new Promise((resolve, reject) => {
       googleTokenClient.callback = async (resp) => {
@@ -1405,15 +1508,15 @@
           reject(new Error(resp.error));
           return;
         }
-      googleAccessToken = resp.access_token;
-      googleAuthorized = true;
-      gapi.client.setToken({ access_token: googleAccessToken });
-      await fetchGoogleProfile();
-      setAuthStatus("Authorized. Loading Drive projects...");
-      resolve(resp);
-    };
-    googleTokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
-  });
+        googleAccessToken = resp.access_token;
+        googleAuthorized = true;
+        gapi.client.setToken({ access_token: googleAccessToken });
+        await fetchGoogleProfile();
+        setAuthStatus("Authorized. Loading Drive projects...");
+        resolve(resp);
+      };
+      googleTokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
+    });
   }
 
   async function ensureGoogleAuthorized() {
@@ -2245,84 +2348,86 @@
 
   async function runAssistantOnce(assistantId, userText) {
     beginLongLoading();
-    // Use combined thread+run creation endpoint:
-    // POST /v1/threads/runs with {assistant_id, thread: {messages:[...]}}
-    logLine("Preparing assistant run " + assistantId + "...");
-    const body = {
-      assistant_id: assistantId,
-      thread: {
-        messages: [
-          {
-            role: "user",
-            content: userText,
-          },
-        ],
-      },
-    };
-    const runObj = await openaiJson("/threads/runs", "POST", body, true, `assistant run ${assistantId}`);
-    const threadId = runObj.thread_id;
-    const runId = runObj.id;
+    try {
+      // Use combined thread+run creation endpoint:
+      // POST /v1/threads/runs with {assistant_id, thread: {messages:[...]}}
+      logLine("Preparing assistant run " + assistantId + "...");
+      const body = {
+        assistant_id: assistantId,
+        thread: {
+          messages: [
+            {
+              role: "user",
+              content: userText,
+            },
+          ],
+        },
+      };
+      const runObj = await openaiJson("/threads/runs", "POST", body, true, `assistant run ${assistantId}`);
+      const threadId = runObj.thread_id;
+      const runId = runObj.id;
 
-    const waitInterval = setInterval(() => logLine(`Waiting on assistant ${assistantId}...`), 15000);
-    const waitTimeout = setTimeout(() => {
-      logLine(`Assistant ${assistantId} run exceeded 5 minutes; aborting.`, true);
-    }, 300000);
+      const waitInterval = setInterval(() => logLine(`Waiting on assistant ${assistantId}...`), 15000);
+      const waitTimeout = setTimeout(() => {
+        logLine(`Assistant ${assistantId} run exceeded 5 minutes; aborting.`, true);
+      }, 300000);
 
-    // Poll run until completed
-    let attempts = 0;
-    while (true) {
-      attempts++;
-      const run = await openaiJson(
-        `/threads/${threadId}/runs/${runId}`,
+      // Poll run until completed
+      let attempts = 0;
+      while (true) {
+        attempts++;
+        const run = await openaiJson(
+          `/threads/${threadId}/runs/${runId}`,
+          "GET",
+          null,
+          true,
+          `assistant status ${assistantId}`
+        );
+        if (run.status === "completed") {
+          break;
+        }
+        if (["failed", "cancelled", "expired"].includes(run.status)) {
+          clearInterval(waitInterval);
+          clearTimeout(waitTimeout);
+          throw new Error("Run ended with status: " + run.status);
+        }
+        if (attempts > 60) {
+          clearInterval(waitInterval);
+          clearTimeout(waitTimeout);
+          throw new Error("Run polling timed out.");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      clearInterval(waitInterval);
+      clearTimeout(waitTimeout);
+      // Retrieve messages
+      const msgs = await openaiJson(
+        `/threads/${threadId}/messages?limit=20`,
         "GET",
         null,
         true,
-        `assistant status ${assistantId}`
+        `assistant messages ${assistantId}`
       );
-      if (run.status === "completed") {
-        break;
+      if (!msgs.data || msgs.data.length === 0) {
+        return "";
       }
-      if (["failed", "cancelled", "expired"].includes(run.status)) {
-        clearInterval(waitInterval);
-        clearTimeout(waitTimeout);
-        throw new Error("Run ended with status: " + run.status);
-      }
-      if (attempts > 60) {
-        clearInterval(waitInterval);
-        clearTimeout(waitTimeout);
-        throw new Error("Run polling timed out.");
-      }
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-
-    clearInterval(waitInterval);
-    clearTimeout(waitTimeout);
-    // Retrieve messages
-    const msgs = await openaiJson(
-      `/threads/${threadId}/messages?limit=20`,
-      "GET",
-      null,
-      true,
-      `assistant messages ${assistantId}`
-    );
-    if (!msgs.data || msgs.data.length === 0) {
-      return "";
-    }
-    // Find first assistant message
-    for (const msg of msgs.data) {
-      if (msg.role === "assistant") {
-        let textParts = [];
-        for (const c of msg.content || []) {
-          if (c.type === "text" && c.text && c.text.value) {
-            textParts.push(c.text.value);
+      // Find first assistant message
+      for (const msg of msgs.data) {
+        if (msg.role === "assistant") {
+          let textParts = [];
+          for (const c of msg.content || []) {
+            if (c.type === "text" && c.text && c.text.value) {
+              textParts.push(c.text.value);
+            }
           }
+          return textParts.join("\n").trim();
         }
-        return textParts.join("\\n").trim();
       }
+      return "";
+    } finally {
+      endLongLoading();
     }
-    return "";
-  } finally {
-    endLongLoading();
   }
 
   // ==============================
@@ -4749,17 +4854,56 @@ Please:
     setCharacterMode(characterConversationMode);
     collapseAllMenuPanels();
 
-    try {
-      ensureDriveConfigPresent();
-    } catch (e) {
-      logLine(e.message, true);
-      setAuthStatus(e.message);
-      $("#google-auth-btn").prop("disabled", true).text("Sign-in unavailable");
+    const $googleBtn = $("#google-auth-btn");
+    const $googleReloadBtn = $("#google-reload-btn");
+
+    async function kickOffGoogleSdk(forceReload = false) {
+      try {
+        ensureDriveConfigPresent();
+        setAuthStatus(forceReload ? "Reloading Google SDK assets..." : "Loading Google SDK assets...");
+        $googleBtn.prop("disabled", true).text("Loading Google SDK...");
+        if (forceReload) {
+          resetGoogleSdkState();
+          logLine("Forcing Google SDK reload after user request.");
+        }
+        await prepareGoogleSdk();
+        $googleBtn.prop("disabled", false).text("Sign in with Google Drive");
+        setAuthStatus("Google SDK ready. Sign in to continue.");
+      } catch (e) {
+        const reason = e?.message || "Google SDK failed to initialize.";
+        logLine(reason, true);
+        setAuthStatus("Google sign-in unavailable: " + reason);
+        $googleBtn.prop("disabled", false).text("Retry Google SDK load");
+      }
     }
 
-    $("#google-auth-btn").on("click", async function () {
+    kickOffGoogleSdk();
+
+    $googleReloadBtn.on("click", async function () {
+      const previous = $(this).text();
+      $(this).prop("disabled", true).text("Reloading SDK...");
+      await kickOffGoogleSdk(true);
+      $(this).prop("disabled", false).text(previous);
+    });
+
+    $googleBtn.on("click", async function () {
       const $btn = $(this);
       const previousLabel = $btn.text();
+      if (!googleDriveReady) {
+        setAuthStatus("Google SDK is still loading. Retrying initialization...");
+        try {
+          await prepareGoogleSdk();
+        } catch (e) {
+          const reason = e?.message || "Google SDK failed to initialize.";
+          logLine("Google SDK initialization failed: " + reason, true);
+          setAuthStatus("Google sign-in unavailable: " + reason);
+          return;
+        }
+        if (!googleDriveReady) {
+          setAuthStatus("Google SDK is still loading. Please try again in a moment.");
+          return;
+        }
+      }
       $btn.prop("disabled", true).text("Signing in...");
       try {
         await bootstrapAfterGoogleAuth();
