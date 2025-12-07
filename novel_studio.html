@@ -1243,7 +1243,6 @@
   let googleAuthorized = false;
   let googleDriveReady = false;
   let googleInitPromise = null;
-  let googleSdkLoadPromise = null;
   let googleUserEmail = null;
   let projects = {}; // { projectName: {name, assistants, vectorStores, outlines, chapters} }
   let currentProjectName = null;
@@ -1399,33 +1398,12 @@
     });
   }
 
-  async function loadGoogleSdkAssets() {
-    if (googleSdkLoadPromise) return googleSdkLoadPromise;
-    googleSdkLoadPromise = (async () => {
-      setAuthStatus("Loading Google SDK assets...");
-      logLine("Loading Google SDK assets...");
-      await Promise.all([
-        loadGoogleScript("google-gsi-script", "https://accounts.google.com/gsi/client", () => !!window.google?.accounts),
-        loadGoogleScript("google-gapi-script", "https://apis.google.com/js/api.js", () => !!window.gapi),
-      ]);
-      logLine("Google SDK assets downloaded. Initializing client...");
-    })().catch((err) => {
-      const message = err?.message || "Google SDK assets failed to load.";
-      logLine("Google SDK asset load failed: " + message, true);
-      setAuthStatus("Google sign-in unavailable: " + message);
-      googleSdkLoadPromise = null;
-      throw err;
-    });
-    return googleSdkLoadPromise;
-  }
-
   async function prepareGoogleSdk() {
     if (googleDriveReady) return;
     if (!googleInitPromise) {
       googleInitPromise = (async () => {
         ensureDriveConfigPresent();
-        await loadGoogleSdkAssets();
-        setAuthStatus("Initializing Google Drive client...");
+        await waitForGoogleSdk();
         await new Promise((resolve, reject) => {
           gapi.load("client", { callback: resolve, onerror: () => reject(new Error("Failed to load gapi client")) });
         });
@@ -1437,7 +1415,6 @@
         const message = err?.message || "Google SDK failed to load";
         logLine("Google SDK initialization failed: " + message, true);
         setAuthStatus("Google sign-in unavailable: " + message);
-        googleInitPromise = null;
         throw err;
       });
     }
@@ -4824,10 +4801,7 @@ Please:
         .then(() => {
           $googleBtn.prop("disabled", false).text("Sign in with Google Drive");
         })
-        .catch((err) => {
-          const reason = err?.message || "Google SDK failed to initialize.";
-          logLine(reason, true);
-          setAuthStatus("Google sign-in unavailable: " + reason);
+        .catch(() => {
           $googleBtn.prop("disabled", true).text("Sign-in unavailable");
         });
     } catch (e) {
@@ -4840,19 +4814,8 @@ Please:
       const $btn = $(this);
       const previousLabel = $btn.text();
       if (!googleDriveReady) {
-        setAuthStatus("Google SDK is still loading. Retrying initialization...");
-        try {
-          await prepareGoogleSdk();
-        } catch (e) {
-          const reason = e?.message || "Google SDK failed to initialize.";
-          logLine("Google SDK initialization failed: " + reason, true);
-          setAuthStatus("Google sign-in unavailable: " + reason);
-          return;
-        }
-        if (!googleDriveReady) {
-          setAuthStatus("Google SDK is still loading. Please try again in a moment.");
-          return;
-        }
+        setAuthStatus("Google SDK is still loading. Please try again in a moment.");
+        return;
       }
       $btn.prop("disabled", true).text("Signing in...");
       try {
