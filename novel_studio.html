@@ -80,6 +80,9 @@
       line-height: 1.4;
       white-space: pre-wrap;
     }
+    #terminal.hidden {
+      display: none;
+    }
     #terminal .line {
       margin: 2px 0;
     }
@@ -95,6 +98,203 @@
       background: #0b0c10;
       box-sizing: border-box;
       font-size: 13px;
+    }
+    #character-canvas {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      background: #0b0c10;
+      border-bottom: 1px solid #1f2833;
+      padding: 10px;
+      box-sizing: border-box;
+      overflow: hidden;
+      gap: 8px;
+    }
+    #canvas-gallery {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #0d1117;
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      padding: 6px;
+      min-height: 86px;
+      box-sizing: border-box;
+    }
+    #canvas-gallery-window {
+      flex: 1;
+      overflow: hidden;
+    }
+    #canvas-gallery-track {
+      display: flex;
+      gap: 8px;
+      transition: scroll-behavior 0.3s ease;
+      overflow-x: auto;
+      scrollbar-width: thin;
+      width: max-content;
+    }
+    .canvas-thumb {
+      width: 110px;
+      height: 70px;
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+      background: #11161f;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #c5c6c7;
+      font-size: 11px;
+      text-align: center;
+    }
+    .canvas-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .canvas-thumb .thumb-label {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 2px 4px;
+      background: rgba(0, 0, 0, 0.65);
+      font-size: 10px;
+      color: #66fcf1;
+      box-sizing: border-box;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .gallery-nav {
+      background: #1f2833;
+      color: #c5c6c7;
+      border: 1px solid #45a29e;
+      border-radius: 4px;
+      width: 26px;
+      height: 60px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+    .gallery-nav:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .canvas-gallery-empty {
+      color: #7b848f;
+      padding: 12px;
+      font-size: 12px;
+    }
+    #character-canvas.visible {
+      display: flex;
+    }
+    #canvas-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    #canvas-header .title {
+      font-weight: bold;
+      font-size: 14px;
+      color: #66fcf1;
+    }
+    #canvas-document {
+      width: 100%;
+      min-height: 220px;
+      resize: vertical;
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      padding: 8px;
+      background: #0b0c10;
+      color: #e5e5e5;
+      box-sizing: border-box;
+    }
+    #canvas-chat-log {
+      flex: 1;
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      padding: 8px;
+      overflow-y: auto;
+      background: #0d1117;
+      box-sizing: border-box;
+    }
+    .canvas-msg {
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #1f2833;
+      white-space: pre-wrap;
+    }
+    .canvas-msg .role {
+      font-weight: bold;
+      color: #45a29e;
+    }
+    #canvas-input-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    #canvas-user-prompt {
+      flex: 1;
+      min-height: 60px;
+      resize: vertical;
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      padding: 6px;
+      background: #0b0c10;
+      color: #e5e5e5;
+    }
+    #canvas-controls-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    #canvas-controls-row label {
+      font-size: 12px;
+      color: #c5c6c7;
+    }
+    #canvas-upload-input {
+      display: none;
+    }
+    .modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+    }
+    .modal-box {
+      background: #0b0c10;
+      border: 1px solid #1f2833;
+      border-radius: 6px;
+      padding: 12px;
+      min-width: 260px;
+      color: #e5e5e5;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+    .modal-box h4 {
+      margin: 0 0 8px 0;
+      color: #66fcf1;
+      font-size: 14px;
+    }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 10px;
     }
     #project-list {
       max-height: 200px;
@@ -258,6 +458,35 @@
   </div>
 
   <div id="main">
+    <div id="character-canvas">
+      <div id="canvas-gallery">
+        <button id="canvas-gallery-prev" class="gallery-nav">&#8249;</button>
+        <div id="canvas-gallery-window">
+          <div id="canvas-gallery-track"></div>
+        </div>
+        <button id="canvas-gallery-next" class="gallery-nav">&#8250;</button>
+      </div>
+      <div id="canvas-header">
+        <div class="title">Character Canvas: <span id="canvas-character-name">None</span></div>
+        <div id="canvas-controls-row">
+          <label for="canvas-ext-select">Format:</label>
+          <select id="canvas-ext-select">
+            <option value="txt">txt</option>
+            <option value="docx">docx</option>
+          </select>
+          <button id="save-character-sheet-btn">Save Sheet</button>
+          <button id="download-character-docx-btn">Download Word Doc</button>
+          <button id="upload-character-docx-btn">Upload Word Doc</button>
+          <input type="file" id="canvas-upload-input" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+        </div>
+      </div>
+      <textarea id="canvas-document" placeholder="Character sheet will appear here for collaborative editing..."></textarea>
+      <div id="canvas-chat-log"></div>
+      <div id="canvas-input-row">
+        <textarea id="canvas-user-prompt" placeholder="Ask the assistant to adjust this sheet..."></textarea>
+        <button id="canvas-send-btn">Send</button>
+      </div>
+    </div>
     <div id="terminal"></div>
     <div id="controls">
       <div class="section-title" style="margin-top:0;">Project Controls</div>
@@ -279,6 +508,10 @@
           <input type="file" id="file-upload-input" multiple />
           <button id="upload-docs-btn">Upload Docs for Category</button>
           <button id="list-category-files-btn">List Files in Category</button>
+          <select id="category-file-select" style="margin-top:4px;width:100%;">
+            <option value="">(refresh to see files)</option>
+          </select>
+          <button id="refresh-category-files-btn">Refresh File List</button>
           <button id="remove-category-file-btn">Remove File from Category</button>
         </div>
 
@@ -1764,15 +1997,48 @@ Please:
       return;
     }
     logLine(`Listing files for category '${category}' (vs: ${vsId})...`);
-    const res = await listVectorStoreFiles(vsId);
-    if (!res.data || !res.data.length) {
+    const files = await loadCategoryFileOptions(project, category);
+    if (!files.length) {
       logLine("No files in that vector store.");
       return;
     }
-    for (const item of res.data) {
-      const meta = await retrieveOpenAIFile(item.id);
-      logLine(`  fileId=${item.id} | filename=${meta.filename} | status=${item.status}`);
+    files.forEach((item) => {
+      logLine(`  fileId=${item.id} | filename=${item.filename} | status=${item.status}`);
+    });
+  }
+
+  async function loadCategoryFileOptions(project, category) {
+    const vsId = project.vectorStores && project.vectorStores[category];
+    const $sel = $("#category-file-select");
+    $sel.empty();
+    if (!vsId) {
+      $sel.append($("<option>").val("").text("(no vector store)"));
+      return [];
     }
+    const res = await listVectorStoreFiles(vsId);
+    const results = [];
+    if (!res.data || !res.data.length) {
+      $sel.append($("<option>").val("").text("(no files)"));
+      return results;
+    }
+    for (const item of res.data) {
+      let filename = item.id;
+      try {
+        const meta = await retrieveOpenAIFile(item.id);
+        filename = meta.filename || filename;
+      } catch (e) {
+        // ignore
+      }
+      results.push({ id: item.id, filename, status: item.status });
+    }
+    results.forEach((r) => {
+      $sel.append(
+        $("<option>")
+          .val(r.id)
+          .text(`${r.filename} (${r.status})`)
+      );
+    });
+    return results;
   }
 
   async function removeFileFromCategory(project) {
@@ -1782,8 +2048,17 @@ Please:
       logLine("No vector store for category '" + category + "'.", true);
       return;
     }
-    const fileId = prompt("Enter the fileId to remove from this category:", "");
-    if (!fileId) return;
+    const files = await loadCategoryFileOptions(project, category);
+    if (!files.length) {
+      logLine("No files available to remove.", true);
+      return;
+    }
+    const choice = await showSelectModal(
+      `Remove file from ${category}`,
+      files.map((f) => ({ value: f.id, label: `${f.filename} (${f.status})` }))
+    );
+    if (!choice) return;
+    const fileId = choice;
     try {
       await deleteVectorStoreFile(vsId, fileId);
       logLine("Removed file from vector store: " + fileId);
@@ -1949,6 +2224,16 @@ Please:
       }
     });
 
+    $("#refresh-category-files-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await loadCategoryFileOptions(project, $("#doc-category-select").val());
+      } catch (e) {
+        logLine("Error refreshing file list: " + e.message, true);
+      }
+    });
+
     $("#list-category-files-btn").on("click", async function () {
       const project = getCurrentProject();
       if (!project) return;
@@ -1966,6 +2251,52 @@ Please:
         await removeFileFromCategory(project);
       } catch (e) {
         logLine("Error removing file: " + e.message, true);
+      }
+    });
+
+    $("#canvas-send-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      await sendCharacterCanvasPrompt(project);
+    });
+
+    $("#save-character-sheet-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      try {
+        await saveCanvasCharacterSheet(project);
+      } catch (e) {
+        logLine("Error saving character sheet: " + e.message, true);
+      }
+    });
+
+    $("#download-character-docx-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      const name = currentCharacterName;
+      if (!name) {
+        alert("Select a character first.");
+        return;
+      }
+      const text = $("#canvas-document").val();
+      await downloadCharacterSheetDocx(name, text);
+    });
+
+    $("#upload-character-docx-btn").on("click", function () {
+      $("#canvas-upload-input").click();
+    });
+
+    $("#canvas-upload-input").on("change", async function (e) {
+      const project = getCurrentProject();
+      if (!project) return;
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        await replaceCharacterSheetFromUpload(project, file);
+      } catch (err) {
+        logLine("Error applying uploaded docx: " + err.message, true);
+      } finally {
+        $("#canvas-upload-input").val("");
       }
     });
 
