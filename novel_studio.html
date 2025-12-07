@@ -624,10 +624,6 @@
       padding: 4px 8px;
       font-size: 12px;
     }
-    .doc-action-note {
-      font-size: 11px;
-      color: #7b848f;
-    }
     #doc-preview {
       border: 1px solid #1f2833;
       border-radius: 6px;
@@ -642,54 +638,6 @@
       max-width: 100%;
       height: auto;
       display: block;
-    }
-    #doc-editor {
-      display: none;
-      flex-direction: column;
-      gap: 10px;
-      border: 1px solid #1f2833;
-      border-radius: 6px;
-      background: #0d1117;
-      padding: 12px;
-    }
-    #doc-editor.visible {
-      display: flex;
-    }
-    #doc-editor-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    #doc-editor-title {
-      font-weight: bold;
-      font-size: 13px;
-      color: #66fcf1;
-    }
-    #doc-editor textarea {
-      width: 100%;
-      min-height: 220px;
-      background: #0b0c10;
-      border: 1px solid #1f2833;
-      border-radius: 4px;
-      color: #e5e5e5;
-      padding: 8px;
-      box-sizing: border-box;
-      font-family: inherit;
-      font-size: 12px;
-      line-height: 1.5;
-      resize: vertical;
-    }
-    #doc-editor .doc-editor-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-    }
-    #doc-canvas.editing #doc-list,
-    #doc-canvas.editing #doc-preview,
-    #doc-canvas.editing #doc-canvas-actions {
-      display: none;
     }
     #doc-canvas-header {
       display: flex;
@@ -879,17 +827,6 @@
       </div>
       <div class="doc-list" id="doc-list"></div>
       <div id="doc-preview">Select a document to preview its contents here.</div>
-      <div id="doc-editor">
-        <div id="doc-editor-header">
-          <div id="doc-editor-title">Editing:</div>
-          <button id="doc-editor-close-btn">Close</button>
-        </div>
-        <textarea id="doc-editor-text" aria-label="Text document editor"></textarea>
-        <div class="doc-editor-actions">
-          <button id="doc-editor-save-btn">Save</button>
-          <button id="doc-editor-cancel-btn">Cancel</button>
-        </div>
-      </div>
       <input type="file" id="doc-canvas-upload" multiple style="display:none;" />
     </div>
     <div id="character-canvas">
@@ -1191,7 +1128,6 @@
     saveProjectsToStorage();
     refreshCharacterSelectUI(project);
     highlightSelectedCharacterCard();
-    $("#canvas-character-name").text(cleanName);
     logLine("Working on character: " + cleanName);
   }
 
@@ -2028,8 +1964,6 @@ When asked about photos:
     if (!currentCharacterName || switching) {
       resetCharacterCanvasSession();
     }
-
-    $("#canvas-character-name").text(name || "None");
 
     setCurrentCharacter(project, name);
     const record = ensureCharacterRecord(project, name);
@@ -3067,7 +3001,6 @@ Please:
 
   function showDocCanvas(project, category) {
     if (!project) return;
-    closeDocEditor();
     const cat = category || $("#doc-category-select").val() || "characters";
     $("#doc-canvas-category").text(cat);
     $("#doc-canvas").addClass("visible");
@@ -3081,70 +3014,6 @@ Please:
 
   function ensureDocPreviewMessage(msg) {
     $("#doc-preview").empty().text(msg || "Select a document to preview its contents here.");
-  }
-
-  function closeDocEditor() {
-    docEditorState = null;
-    $("#doc-editor-text").val("");
-    $("#doc-editor-title").text("Editing:");
-    $("#doc-editor").removeClass("visible");
-    $("#doc-canvas").removeClass("editing");
-    ensureDocPreviewMessage();
-  }
-
-  async function openTextDocEditor(project, category, doc) {
-    if (!doc || !/\.txt$/i.test(doc.filename || "")) {
-      throw new Error("Only .txt files can be edited.");
-    }
-    docEditorState = { projectName: currentProjectName, category, doc };
-    $("#doc-editor-title").text(`Editing: ${doc.filename}`);
-    $("#doc-editor-text").val("Loading...");
-    $("#doc-canvas").addClass("editing");
-    $("#doc-editor").addClass("visible");
-    const content = await fetchOpenAIFileContent(doc.id);
-    if (content.type !== "text") {
-      closeDocEditor();
-      throw new Error("Only text files can be edited.");
-    }
-    $("#doc-editor-text").val(content.data || "");
-  }
-
-  async function saveDocEditor() {
-    if (!docEditorState) return;
-    const { category, doc, projectName } = docEditorState;
-    if (projectName !== currentProjectName) {
-      logLine("Project changed while editing; closing editor.", true);
-      closeDocEditor();
-      return;
-    }
-    const project = getCurrentProject();
-    if (!project) return;
-
-    const text = $("#doc-editor-text").val() || "";
-    const filename = doc.filename || "document.txt";
-    const vsId = await ensureVectorStore(project, category);
-    const textFile = new File([text], filename, { type: "text/plain" });
-    const uploadRes = await uploadFileToOpenAI(textFile);
-    if (vsId) {
-      await attachFileToVectorStore(vsId, uploadRes.id);
-    }
-    if (vsId && doc.id) {
-      try {
-        await deleteVectorStoreFile(vsId, doc.id);
-      } catch (e) {
-        logLine("Failed to remove old file from vector store: " + e.message, true);
-      }
-    }
-    if (doc.id) {
-      try {
-        await deleteOpenAIFile(doc.id);
-      } catch (e) {
-        logLine("Failed to delete old OpenAI file: " + e.message, true);
-      }
-    }
-    logLine(`Saved updated text file ${filename} (fileId: ${uploadRes.id})`);
-    closeDocEditor();
-    await renderDocExplorer(project, category);
   }
 
   async function fetchCategoryDocuments(project, category) {
@@ -3175,7 +3044,6 @@ Please:
   async function renderDocExplorer(project, category) {
     const $list = $("#doc-list");
     $list.empty();
-    ensureDocPreviewMessage("Select a text document to edit it. Other file types cannot be previewed here.");
     const docs = await fetchCategoryDocuments(project, category);
 
     const $header = $("<div>").addClass("doc-row doc-row-header");
@@ -3203,21 +3071,16 @@ Please:
       const kb = doc.bytes ? (doc.bytes / 1024).toFixed(1) : "-";
       $row.append($("<div>").text(kb));
       const $actions = $("<div>").addClass("doc-actions");
+      const $view = $("<button>").text("🔍 View");
       const $delete = $("<button>").text("🗑️ Delete");
 
-      if (/\.txt$/i.test(doc.filename || "")) {
-        const $edit = $("<button>").text("✏️ Edit");
-        $edit.on("click", async () => {
-          try {
-            await openTextDocEditor(project, category, doc);
-          } catch (e) {
-            logLine("Error opening editor: " + e.message, true);
-          }
-        });
-        $actions.append($edit);
-      } else {
-        $actions.append($("<span>").addClass("doc-action-note").text("No preview"));
-      }
+      $view.on("click", async () => {
+        try {
+          await previewDocument(project, doc);
+        } catch (e) {
+          logLine("Error previewing document: " + e.message, true);
+        }
+      });
 
       $delete.on("click", async () => {
         const confirmDelete = confirm(`Delete ${doc.filename} from ${category}? This removes it from OpenAI storage.`);
@@ -3235,7 +3098,7 @@ Please:
         }
       });
 
-      $actions.append($delete);
+      $actions.append($view, $delete);
       $row.append($actions);
       $list.append($row);
     });
@@ -3330,18 +3193,6 @@ Please:
         logLine("Error uploading documents: " + err.message, true);
       } finally {
         $(this).val("");
-      }
-    });
-
-    $("#doc-editor-close-btn, #doc-editor-cancel-btn").on("click", function () {
-      closeDocEditor();
-    });
-
-    $("#doc-editor-save-btn").on("click", async function () {
-      try {
-        await saveDocEditor();
-      } catch (e) {
-        logLine("Error saving text document: " + e.message, true);
       }
     });
 
