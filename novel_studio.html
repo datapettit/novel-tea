@@ -568,6 +568,11 @@
       color: #c5c6c7;
       border-bottom: 1px solid #1f2833;
     }
+    #console-panel-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
     #console-toggle-btn {
       background: #1f2833;
       color: #c5c6c7;
@@ -585,6 +590,9 @@
     }
     #console-panel.expanded #console-panel-body {
       display: block;
+    }
+    #console-panel.collapsed #console-copy-btn {
+      display: none;
     }
     #console-log .line {
       margin: 2px 0;
@@ -927,6 +935,14 @@
       <button id="google-auth-btn">Sign in with Google Drive</button>
       <button id="google-reload-btn" class="small" style="background:#1f2833;color:#e5e5e5;">Force reload SDK</button>
     </div>
+    <div style="margin-top:8px;">
+      <div style="font-size:12px;color:#c5c6c7;">Google OAuth Client ID</div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
+        <input type="text" id="google-client-id-input" placeholder="Paste your OAuth client ID" style="flex:1;min-width:260px;" />
+        <button id="google-client-id-save-btn" class="small">Save client ID</button>
+      </div>
+      <div id="google-client-id-status" style="font-size:11px;color:#c5c6c7;margin-top:4px;"></div>
+    </div>
     <div id="auth-status-text">Waiting for sign-in...</div>
   </div>
 </div>
@@ -1201,13 +1217,16 @@
   </div>
 </div>
 
-<div id="console-panel" class="collapsed">
-  <div id="console-panel-header">
+  <div id="console-panel" class="collapsed">
+    <div id="console-panel-header">
 <span id="console-panel-title">Console (collapsed)</span>
-    <button id="console-toggle-btn">Expand</button>
-  </div>
-  <div id="console-panel-body">
-    <div id="console-log"></div>
+      <div id="console-panel-actions">
+        <button id="console-copy-btn" class="small">Copy log</button>
+        <button id="console-toggle-btn">Expand</button>
+      </div>
+    </div>
+    <div id="console-panel-body">
+      <div id="console-log"></div>
   </div>
 </div>
 
@@ -1222,8 +1241,10 @@
   const PROJECTS_KEY = "novelStudioProjects"; // localStorage key
   const MODEL_KEY = "novelStudioAssistantModel";
   const ASSISTANT_MODELS = ["gpt-4.1", "gpt-4o", "gpt-4o-mini"];
-  const GOOGLE_CLIENT_ID =
+  const GOOGLE_CLIENT_ID_STORAGE_KEY = "novelStudioGoogleClientId";
+  let googleClientId =
     new URLSearchParams(window.location.search).get("googleClientId") ||
+    localStorage.getItem(GOOGLE_CLIENT_ID_STORAGE_KEY) ||
     "YOUR_GOOGLE_CLIENT_ID";
   const GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/drive",
@@ -1261,6 +1282,30 @@
     });
     logLine("resetGoogleSdkState: Google SDK state cleared. Reloading scripts is now allowed.");
     logLine("resetGoogleSdkState: end");
+  }
+
+  function updateGoogleClientIdStatus() {
+    const $status = $("#google-client-id-status");
+    if (!$status.length) return;
+    if (!googleClientId || googleClientId.includes("YOUR_")) {
+      $status.text("Client ID missing. Paste your Google OAuth client ID and save it.");
+    } else {
+      const tail = googleClientId.slice(-8);
+      $status.text(`Using client ID ending with ...${tail}. Stored locally.`);
+    }
+  }
+
+  function setGoogleClientId(value) {
+    const trimmed = (value || "").trim();
+    googleClientId = trimmed || "YOUR_GOOGLE_CLIENT_ID";
+    if (trimmed) {
+      localStorage.setItem(GOOGLE_CLIENT_ID_STORAGE_KEY, trimmed);
+    } else {
+      localStorage.removeItem(GOOGLE_CLIENT_ID_STORAGE_KEY);
+    }
+    $("#google-client-id-input").val(trimmed);
+    updateGoogleClientIdStatus();
+    logLine("Google OAuth client ID updated.");
   }
   let projects = {}; // { projectName: {name, assistants, vectorStores, outlines, chapters} }
   let currentProjectName = null;
@@ -1382,7 +1427,7 @@
       );
       loggedLocalhostHint = true;
     }
-    if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.includes("YOUR_")) {
+    if (!googleClientId || googleClientId.includes("YOUR_")) {
       logLine("ensureDriveConfigPresent: GOOGLE_CLIENT_ID missing or placeholder.", true);
       throw new Error("Set GOOGLE_CLIENT_ID to a valid OAuth client id for Google Drive.");
     }
@@ -1483,7 +1528,7 @@
     if (googleTokenClient) return googleTokenClient;
     ensureDriveConfigPresent();
     googleTokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: GOOGLE_CLIENT_ID,
+      client_id: googleClientId,
       scope: GOOGLE_SCOPES,
       callback: () => {},
     });
@@ -1693,6 +1738,31 @@
     $content.append($("<span>").addClass("prefix").text(prefix + " "));
     $content.append(document.createTextNode(message));
     appendToConsole($content, isError);
+  }
+
+  async function copyConsoleLog() {
+    const text = $("#console-log .line")
+      .map((_, el) => $(el).text())
+      .get()
+      .join("\n")
+      .trim();
+
+    if (!text) {
+      logLine("Console is empty; nothing to copy.");
+      return;
+    }
+
+    if (!navigator.clipboard) {
+      logLine("Clipboard access is not available in this browser.", true);
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      logLine("Console log copied to clipboard.");
+    } catch (err) {
+      logLine("Failed to copy console log: " + err.message, true);
+    }
   }
 
   function logLink(label, url, downloadName = null) {
@@ -2018,6 +2088,7 @@
     $("#console-panel").toggleClass("expanded", expanded);
     $("#console-panel-title").text(expanded ? "Console (expanded)" : "Console (collapsed)");
     $("#console-toggle-btn").text(expanded ? "Collapse" : "Expand");
+    $("#console-copy-btn").prop("disabled", !expanded);
   }
 
   function saveProjectsToStorage() {
@@ -4869,6 +4940,10 @@ Please:
     setCharacterMode(characterConversationMode);
     collapseAllMenuPanels();
 
+    const initialClientId = googleClientId && !googleClientId.includes("YOUR_") ? googleClientId : "";
+    $("#google-client-id-input").val(initialClientId);
+    updateGoogleClientIdStatus();
+
     const $googleBtn = $("#google-auth-btn");
     try {
       ensureDriveConfigPresent();
@@ -4905,6 +4980,33 @@ Please:
       } finally {
         $btn.prop("disabled", false).text(previousLabel);
         logLine("Google sign-in button handler finished.");
+      }
+    });
+
+    $("#google-client-id-save-btn").on("click", async function () {
+      const $reloadBtn = $("#google-reload-btn");
+      const $authBtn = $("#google-auth-btn");
+      setGoogleClientId($("#google-client-id-input").val());
+      if (!googleClientId || googleClientId.includes("YOUR_")) {
+        setAuthStatus("Set a valid Google OAuth client ID to enable Drive sign-in.");
+        $authBtn.prop("disabled", true).text("Sign-in unavailable");
+        return;
+      }
+      logLine("Google SDK reload requested after client ID change.");
+      $reloadBtn.prop("disabled", true).text("Reloading SDK...");
+      $authBtn.prop("disabled", true).text("Loading Google SDK...");
+      try {
+        resetGoogleSdkState();
+        setAuthStatus("Reloading Google SDK with updated client ID...");
+        await prepareGoogleSdk();
+        $authBtn.prop("disabled", false).text("Sign in with Google Drive");
+        logLine("Google SDK reload completed after client ID change.");
+      } catch (e) {
+        logLine("Reload after client ID change failed: " + e.message, true);
+        setAuthStatus("Google SDK reload failed: " + e.message);
+        $authBtn.prop("disabled", true).text("Sign-in unavailable");
+      } finally {
+        $reloadBtn.prop("disabled", false).text("Force reload SDK");
       }
     });
 
@@ -4975,6 +5077,11 @@ Please:
 
     $("#console-panel-header").on("click", function () {
       setConsoleExpanded(!consoleExpanded);
+    });
+
+    $("#console-copy-btn").on("click", async function (e) {
+      e.stopPropagation();
+      await copyConsoleLog();
     });
 
     $("#console-toggle-btn").on("click", function (e) {
