@@ -34,6 +34,40 @@
       display: flex;
       flex-direction: column;
     }
+    #loading-indicator {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border: 1px solid #45a29e;
+      background: rgba(11, 12, 16, 0.9);
+      border-radius: 6px;
+      z-index: 30;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    }
+    #loading-indicator.visible {
+      display: flex;
+    }
+    .loading-spinner {
+      width: 18px;
+      height: 18px;
+      border: 3px solid #1f2833;
+      border-top-color: #66fcf1;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    .loading-text {
+      font-size: 12px;
+      color: #c5c6c7;
+    }
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
     .section-title {
       font-weight: bold;
       margin-top: 10px;
@@ -72,29 +106,6 @@
       font-size: 11px;
       padding: 2px 6px;
       margin-left: 4px;
-    }
-    #terminal {
-      flex: 1;
-      background: #0b0c10;
-      padding: 10px;
-      overflow-y: auto;
-      border-bottom: 1px solid #1f2833;
-      box-sizing: border-box;
-      font-size: 13px;
-      line-height: 1.4;
-      white-space: pre-wrap;
-    }
-    #terminal.hidden {
-      display: none;
-    }
-    #terminal .line {
-      margin: 2px 0;
-    }
-    #terminal .line .prefix {
-      color: #45a29e;
-    }
-    #terminal .line.error {
-      color: #ff6b6b;
     }
     #controls {
       padding: 8px;
@@ -654,6 +665,10 @@
   </style>
 </head>
 <body>
+<div id="loading-indicator">
+  <div class="loading-spinner"></div>
+  <div class="loading-text">Working...</div>
+</div>
 <div id="app">
   <div id="sidebar">
     <div class="section-title">API Key</div>
@@ -847,7 +862,6 @@
         <button id="canvas-send-btn">Send</button>
       </div>
     </div>
-    <div id="terminal"></div>
     <div id="controls">
       <div class="section-title" style="margin-top:0;">Status</div>
       <div id="status-bar">Ready.</div>
@@ -881,6 +895,7 @@
   let assistantModel = ASSISTANT_MODELS[0];
   let currentCharacterName = null;
   let consoleExpanded = false;
+  let docEditorState = null;
 
   function fileToDataUrl(file) {
     return new Promise((resolve, reject) => {
@@ -904,25 +919,47 @@
     return new File([u8arr], filename, { type: mime });
   }
 
-  function logToConsolePanel(message, isError = false) {
+  function appendToConsole($content, isError = false) {
     const $line = $("<div>").addClass("line");
     if (isError) $line.addClass("error");
-    const prefix = isError ? "[ERR]" : "[LOG]";
-    $line.append($("<span>").addClass("prefix").text(prefix + " "));
-    $line.append(document.createTextNode(message));
+    $line.append($content);
     $("#console-log").append($line);
     $("#console-log").scrollTop($("#console-log")[0].scrollHeight);
   }
 
   function logLine(message, isError = false) {
-    const $line = $("<div>").addClass("line");
-    if (isError) $line.addClass("error");
     const prefix = isError ? "[ERR]" : "[LOG]";
-    $line.append($("<span>").addClass("prefix").text(prefix + " "));
-    $line.append(document.createTextNode(message));
-    $("#terminal").append($line);
-    $("#terminal").scrollTop($("#terminal")[0].scrollHeight);
-    logToConsolePanel(message, isError);
+    const $content = $("<span>");
+    $content.append($("<span>").addClass("prefix").text(prefix + " "));
+    $content.append(document.createTextNode(message));
+    appendToConsole($content, isError);
+  }
+
+  function logLink(label, url, downloadName = null) {
+    const $content = $("<span>");
+    $content.append($("<span>").addClass("prefix").text("[LINK] "));
+    const $anchor = $("<a>").addClass("download-link").attr("href", url).attr("target", "_blank").text(label);
+    if (downloadName) {
+      $anchor.attr("download", downloadName);
+    }
+    $content.append($anchor);
+    appendToConsole($content, false);
+  }
+
+  let activeRequests = 0;
+
+  function updateLoadingIndicator() {
+    $("#loading-indicator").toggleClass("visible", activeRequests > 0);
+  }
+
+  function beginLoading() {
+    activeRequests += 1;
+    updateLoadingIndicator();
+  }
+
+  function endLoading() {
+    activeRequests = Math.max(0, activeRequests - 1);
+    updateLoadingIndicator();
   }
 
   function setStatus(message) {
@@ -932,6 +969,7 @@
   function fetchWithTimeout(url, options, label = "request") {
     const controller = new AbortController();
     const merged = { ...options, signal: controller.signal };
+    beginLoading();
     logLine(`Sending ${label}...`);
     const waitInterval = setInterval(() => logLine(`Waiting on ${label}...`), 15000);
     const timeoutId = setTimeout(() => {
@@ -940,15 +978,16 @@
     }, 300000);
     return fetch(url, merged)
       .then((res) => {
-        clearInterval(waitInterval);
-        clearTimeout(timeoutId);
         logLine(`${label} response received.`);
         return res;
       })
       .catch((err) => {
+        throw err;
+      })
+      .finally(() => {
         clearInterval(waitInterval);
         clearTimeout(timeoutId);
-        throw err;
+        endLoading();
       });
   }
 
@@ -1080,6 +1119,7 @@
     if (!cleanName) {
       currentCharacterName = null;
       refreshCharacterSelectUI(project);
+      $("#canvas-character-name").text("None");
       logLine("Cleared current character selection.");
       return;
     }
@@ -2314,8 +2354,8 @@ Structure your answer like:
       .attr("href", url)
       .attr("download", "trilogy_outline.md")
       .text("Download trilogy_outline.md");
-    logLine("Click to download trilogy outline: ");
-    $("#terminal").append($link).append("<br/>");
+    logLine("Click to download trilogy outline:");
+    logLink("Download trilogy_outline.md", url, "trilogy_outline.md");
   }
 
   async function buildBookOutline(project) {
@@ -2374,8 +2414,8 @@ Using the trilogy outline (if available) and all project lore:
       .attr("href", dlUrl)
       .attr("download", `book_${bookNumber}_outline.json`)
       .text(`Download book_${bookNumber}_outline.json`);
-    logLine("Click to download JSON outline: ");
-    $("#terminal").append($link).append("<br/>");
+    logLine("Click to download JSON outline:");
+    logLink(`Download book_${bookNumber}_outline.json`, dlUrl, `book_${bookNumber}_outline.json`);
   }
 
   async function draftChapter(project) {
@@ -2487,8 +2527,12 @@ Please write the full chapter, following your system-level drafting rules.
       .attr("href", dlUrl)
       .attr("download", `book${bookNumber}_act${act}_chapter${chapterNum}_draft.md`)
       .text(`Download chapter draft (Book ${bookNumber} Act ${act} Ch ${chapterNum})`);
-    logLine("Click to download draft: ");
-    $("#terminal").append($link).append("<br/>");
+    logLine("Click to download draft:");
+    logLink(
+      `Download chapter draft (Book ${bookNumber} Act ${act} Ch ${chapterNum})`,
+      dlUrl,
+      `book${bookNumber}_act${act}_chapter${chapterNum}_draft.md`
+    );
   }
 
   async function draftWholeBook(project, bookNumber) {
@@ -2692,8 +2736,12 @@ CORRECTED CHAPTER:
       .attr("href", dlUrl)
       .attr("download", fileName)
       .text(`Download edited chapter (Book ${bookNumber} Act ${act} Ch ${chapterNum})`);
-    logLine("Click to download edited chapter: ");
-    $("#terminal").append($link).append("<br/>");
+    logLine("Click to download edited chapter:");
+    logLink(
+      `Download edited chapter (Book ${bookNumber} Act ${act} Ch ${chapterNum})`,
+      dlUrl,
+      fileName
+    );
   }
 
   async function reviewWholeBook(project) {
@@ -2753,12 +2801,7 @@ Please:
     const url = URL.createObjectURL(blob);
 
     logLine("Book-level review generated for Book " + bookNumber);
-    const $link = $("<a>")
-      .addClass("download-link")
-      .attr("href", url)
-      .attr("download", fileName)
-      .text(`Download book_${bookNumber}_level_review.md`);
-    $("#terminal").append($link).append("<br/>");
+    logLink(`Download book_${bookNumber}_level_review.md`, url, fileName);
   }
 
   async function ttsForChapter(project) {
@@ -2798,13 +2841,8 @@ Please:
     });
     const narratorUrl = URL.createObjectURL(narratorBlob);
     const narratorFileName = `book${bookNumber}_act${act}_chapter${chapterNum}_narrator.mp3`;
-    const $narrLink = $("<a>")
-      .addClass("download-link")
-      .attr("href", narratorUrl)
-      .attr("download", narratorFileName)
-      .text("Download narrator audio");
-    logLine("Narrator audio ready: ");
-    $("#terminal").append($narrLink).append("<br/>");
+    logLine("Narrator audio ready:");
+    logLink("Download narrator audio", narratorUrl, narratorFileName);
 
     if (confirm("Generate a MALE voice clip for some lines?")) {
       const maleSnippet = prompt("Paste the text for the MALE voice:", "");
@@ -2818,13 +2856,8 @@ Please:
         });
         const maleUrl = URL.createObjectURL(maleBlob);
         const maleFileName = `book${bookNumber}_act${act}_chapter${chapterNum}_male.mp3`;
-        const $maleLink = $("<a>")
-          .addClass("download-link")
-          .attr("href", maleUrl)
-          .attr("download", maleFileName)
-          .text("Download male voice audio");
-        logLine("Male voice audio ready: ");
-        $("#terminal").append($maleLink).append("<br/>");
+        logLine("Male voice audio ready:");
+        logLink("Download male voice audio", maleUrl, maleFileName);
       }
     }
 
@@ -2840,13 +2873,8 @@ Please:
         });
         const femaleUrl = URL.createObjectURL(femaleBlob);
         const femaleFileName = `book${bookNumber}_act${act}_chapter${chapterNum}_female.mp3`;
-        const $femaleLink = $("<a>")
-          .addClass("download-link")
-          .attr("href", femaleUrl)
-          .attr("download", femaleFileName)
-          .text("Download female voice audio");
-        logLine("Female voice audio ready: ");
-        $("#terminal").append($femaleLink).append("<br/>");
+        logLine("Female voice audio ready:");
+        logLink("Download female voice audio", femaleUrl, femaleFileName);
       }
     }
 
