@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <title>Novel Studio – OpenAI HTML Client</title>
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://apis.google.com/js/api.js" async defer></script>
   <style>
     body {
       margin: 0;
@@ -317,6 +319,68 @@
       color: #e5e5e5;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
     }
+    #image-viewer {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.86);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 40;
+    }
+    #image-viewer.visible {
+      display: flex;
+    }
+    #image-viewer .viewer-frame {
+      position: relative;
+      background: #0d1117;
+      border: 1px solid #1f2833;
+      border-radius: 10px;
+      padding: 12px;
+      max-width: 90vw;
+      max-height: 90vh;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    }
+    #image-viewer img {
+      max-width: 80vw;
+      max-height: 80vh;
+      display: block;
+      border-radius: 8px;
+    }
+    #image-viewer .viewer-close {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: #1f2833;
+      color: #e5e5e5;
+      border: 1px solid #45a29e;
+      border-radius: 50%;
+      width: 28px;
+      height: 28px;
+      cursor: pointer;
+    }
+    .mode-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #0d1117;
+      border: 1px solid #1f2833;
+      padding: 4px 6px;
+      border-radius: 6px;
+    }
+    .mode-toggle button {
+      margin-top: 0;
+      padding: 4px 8px;
+      font-size: 12px;
+      background: #1f2833;
+      color: #c5c6c7;
+      border: 1px solid #1f2833;
+    }
+    .mode-toggle button.active {
+      background: #45a29e;
+      color: #0b0c10;
+      border-color: #66fcf1;
+    }
     .modal-box h4 {
       margin: 0 0 8px 0;
       color: #66fcf1;
@@ -404,6 +468,12 @@
       background: #0f111a;
       border-bottom: 1px solid #1f2833;
       list-style: none;
+      transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .menu-panel.active summary {
+      background: linear-gradient(90deg, rgba(102, 252, 241, 0.14), transparent);
+      border-left: 3px solid #66fcf1;
+      box-shadow: inset 0 0 0 1px rgba(102, 252, 241, 0.25);
     }
     .menu-body {
       padding: 8px 10px 12px 10px;
@@ -529,7 +599,7 @@
       align-items: center;
       justify-content: center;
       color: #c5c6c7;
-      transition: border-color 0.2s ease, transform 0.2s ease;
+      transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
     }
     .character-card:hover {
       border-color: #45a29e;
@@ -537,15 +607,31 @@
     }
     .character-card.selected {
       border-color: #66fcf1;
-      box-shadow: 0 0 0 2px rgba(102, 252, 241, 0.25);
+      box-shadow: 0 0 0 2px rgba(102, 252, 241, 0.35);
+    }
+    .character-card.selected::after {
+      content: "";
+      position: absolute;
+      inset: 2px;
+      border: 1px solid rgba(102, 252, 241, 0.5);
+      border-radius: 5px;
+      pointer-events: none;
+      box-shadow: 0 0 12px rgba(102, 252, 241, 0.3);
     }
     .character-card .card-image {
       position: absolute;
       inset: 0;
-      background-size: cover;
+      background-size: 100% auto;
       background-position: center;
-      opacity: 0.6;
-      filter: blur(0px) saturate(1.1);
+      opacity: 0.4;
+      filter: saturate(1.1);
+      transition: opacity 0.2s ease;
+    }
+    .character-card:hover .card-image {
+      opacity: 0.75;
+    }
+    .character-card.selected .card-image {
+      opacity: 1;
     }
     .character-card .card-overlay {
       position: absolute;
@@ -624,6 +710,14 @@
       padding: 4px 8px;
       font-size: 12px;
     }
+    .icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      font-size: 12px;
+      min-width: 34px;
+    }
     #doc-preview {
       border: 1px solid #1f2833;
       border-radius: 6px;
@@ -662,14 +756,78 @@
       font-size: 11px;
       margin-top: 6px;
     }
+    #auth-overlay {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at center, rgba(11, 12, 16, 0.96), rgba(11, 12, 16, 0.98));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+    #auth-card {
+      width: min(520px, 90%);
+      background: #0d1117;
+      border: 1px solid #1f2833;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+      color: #e5e5e5;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #auth-card h2 {
+      margin: 0;
+      font-size: 20px;
+      color: #66fcf1;
+    }
+    #auth-card p {
+      margin: 0;
+      color: #c5c6c7;
+      line-height: 1.4;
+      font-size: 14px;
+    }
+    #google-auth-btn {
+      align-self: flex-start;
+      background: #4285f4;
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+    }
+    #google-auth-btn:hover {
+      background: #5a95f5;
+    }
+    #auth-status-text {
+      font-size: 12px;
+      color: #c5c6c7;
+    }
+    #app.locked {
+      filter: blur(1px);
+      pointer-events: none;
+      user-select: none;
+    }
   </style>
 </head>
 <body>
+<div id="auth-overlay">
+  <div id="auth-card">
+    <h2>Connect Google Drive</h2>
+    <p>
+      Novel Studio now uses your Google Drive as the source of truth for all images and documents.
+      Sign in to grant Drive access before working with any projects.
+    </p>
+    <button id="google-auth-btn">Sign in with Google Drive</button>
+    <div id="auth-status-text">Waiting for sign-in...</div>
+  </div>
+</div>
 <div id="loading-indicator">
   <div class="loading-spinner"></div>
   <div class="loading-text">Working...</div>
 </div>
-<div id="app">
+<div id="app" class="locked">
   <div id="sidebar">
     <div class="section-title">API Key</div>
     <input type="password" id="api-key-input" placeholder="Enter OpenAI API key" />
@@ -703,7 +861,7 @@
 
     <div class="section-title" style="margin-top:14px;">Workspace Menus</div>
 
-    <details class="menu-panel" id="setup-docs-panel" open>
+    <details class="menu-panel" id="setup-docs-panel">
       <summary>Setup & Docs</summary>
       <div class="menu-body">
         <div class="menu-subgroup">
@@ -738,7 +896,7 @@
       </div>
     </details>
 
-    <details class="menu-panel" id="character-panel" open>
+    <details class="menu-panel" id="character-panel">
       <summary>Character Development</summary>
       <div class="menu-body">
         <div class="menu-subgroup">
@@ -772,7 +930,7 @@
       </div>
     </details>
 
-    <details class="menu-panel" open>
+    <details class="menu-panel">
       <summary>Story Building</summary>
       <div class="menu-body">
         <div class="menu-subgroup">
@@ -823,6 +981,7 @@
         <div id="doc-canvas-actions">
           <button id="doc-add-btn">Add document(s)</button>
           <button id="doc-refresh-btn">Refresh List</button>
+          <button id="doc-resync-btn">Resync to Vector Store</button>
         </div>
       </div>
       <div class="doc-list" id="doc-list"></div>
@@ -839,6 +998,10 @@
       </div>
       <div id="canvas-header">
         <div class="title">Character Canvas: <span id="canvas-character-name">None</span></div>
+        <div class="mode-toggle" id="character-mode-toggle">
+          <button data-mode="edit" class="active">Edit Sheet</button>
+          <button data-mode="chat">Discuss Character</button>
+        </div>
         <div id="canvas-controls-row">
           <label for="canvas-ext-select">Format:</label>
           <select id="canvas-ext-select">
@@ -869,6 +1032,14 @@
   </div>
 </div>
 
+<div id="image-viewer">
+  <div class="viewer-frame">
+    <button class="viewer-close" id="image-viewer-close">×</button>
+    <img id="image-viewer-img" alt="Image preview" />
+    <div id="image-viewer-caption" style="margin-top:8px;font-size:12px;color:#c5c6c7;"></div>
+  </div>
+</div>
+
 <div id="console-panel" class="collapsed">
   <div id="console-panel-header">
     <span id="console-panel-title">Console (collapsed)</span>
@@ -890,12 +1061,37 @@
   const PROJECTS_KEY = "novelStudioProjects"; // localStorage key
   const MODEL_KEY = "novelStudioAssistantModel";
   const ASSISTANT_MODELS = ["gpt-4.1", "gpt-4o", "gpt-4o-mini"];
+  const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID";
+  const GOOGLE_SCOPES = [
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive.metadata",
+  ].join(" ");
+  const PROJECT_PREFIX = "novel - ";
+  const CATEGORY_FOLDERS = [
+    "characters",
+    "locations",
+    "relationships",
+    "storyline",
+    "history",
+    "outlines",
+    "drafts",
+  ];
+  const CHARACTER_CATEGORY = "characters";
+  let googleTokenClient = null;
+  let googleAccessToken = null;
+  let googleAuthorized = false;
+  let googleDriveReady = false;
+  let googleUserEmail = null;
   let projects = {}; // { projectName: {name, assistants, vectorStores, outlines, chapters} }
   let currentProjectName = null;
   let assistantModel = ASSISTANT_MODELS[0];
   let currentCharacterName = null;
   let consoleExpanded = false;
   let docEditorState = null;
+  let characterConversationMode = "edit";
+  const imageCache = new Map();
+  let suppressMenuToggle = false;
 
   function fileToDataUrl(file) {
     return new Promise((resolve, reject) => {
@@ -917,6 +1113,215 @@
       u8arr[n] = bstr.charCodeAt(n);
     }
     return new File([u8arr], filename, { type: mime });
+  }
+
+  function setAuthStatus(message) {
+    $("#auth-status-text").text(message);
+  }
+
+  function setAppLocked(locked) {
+    $("#app").toggleClass("locked", locked);
+    $("#auth-overlay").toggle(locked);
+  }
+
+  function ensureDriveConfigPresent() {
+    if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.includes("YOUR_")) {
+      throw new Error("Set GOOGLE_CLIENT_ID to a valid OAuth client id for Google Drive.");
+    }
+  }
+
+  function waitForGoogleSdk() {
+    return new Promise((resolve, reject) => {
+      let attempts = 0;
+      function check() {
+        attempts += 1;
+        if (window.gapi && window.google) {
+          resolve();
+          return;
+        }
+        if (attempts > 200) {
+          reject(new Error("Google SDKs did not load."));
+          return;
+        }
+        setTimeout(check, 50);
+      }
+      check();
+    });
+  }
+
+  async function initGoogleDriveClient() {
+    ensureDriveConfigPresent();
+    if (googleDriveReady) return;
+    await waitForGoogleSdk();
+    await new Promise((resolve, reject) => {
+      gapi.load("client", { callback: resolve, onerror: () => reject(new Error("Failed to load gapi client")) });
+    });
+    await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
+    googleDriveReady = true;
+  }
+
+  function initGoogleTokenClient() {
+    if (googleTokenClient) return googleTokenClient;
+    ensureDriveConfigPresent();
+    googleTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: GOOGLE_SCOPES,
+      callback: () => {},
+    });
+    return googleTokenClient;
+  }
+
+  async function requestGoogleAuth(interactive = true) {
+    await initGoogleDriveClient();
+    initGoogleTokenClient();
+    return new Promise((resolve, reject) => {
+      googleTokenClient.callback = async (resp) => {
+        if (resp.error) {
+          setAuthStatus("Google authorization failed: " + resp.error);
+          reject(new Error(resp.error));
+          return;
+        }
+      googleAccessToken = resp.access_token;
+      googleAuthorized = true;
+      gapi.client.setToken({ access_token: googleAccessToken });
+      await fetchGoogleProfile();
+      setAuthStatus("Authorized. Loading Drive projects...");
+      resolve(resp);
+    };
+    googleTokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
+  });
+  }
+
+  async function ensureGoogleAuthorized() {
+    if (googleAuthorized && googleAccessToken) return true;
+    try {
+      await requestGoogleAuth(true);
+      return true;
+    } catch (e) {
+      logLine("Google auth required: " + e.message, true);
+      return false;
+    }
+  }
+
+  async function fetchGoogleProfile() {
+    if (!googleAccessToken) return null;
+    try {
+      const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+        headers: { Authorization: "Bearer " + googleAccessToken },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        googleUserEmail = data.email || null;
+      }
+    } catch (e) {
+      // ignore profile fetch failures
+    }
+  }
+
+  async function driveFetch(path, options = {}, upload = false) {
+    if (!googleAccessToken) throw new Error("Google Drive token missing");
+    const base = upload ? "https://www.googleapis.com/upload/drive/v3" : "https://www.googleapis.com/drive/v3";
+    const headers = options.headers || {};
+    headers["Authorization"] = "Bearer " + googleAccessToken;
+    const res = await fetch(base + path, { ...options, headers });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Drive API error (${res.status}): ${text}`);
+    }
+    return res;
+  }
+
+  async function listDriveFolders(query) {
+    const params = new URLSearchParams({
+      q: query,
+      fields: "files(id,name,parents,mimeType,modifiedTime)",
+      spaces: "drive",
+      pageSize: 1000,
+    });
+    const res = await driveFetch(`/files?${params.toString()}`);
+    const data = await res.json();
+    return data.files || [];
+  }
+
+  async function findOrCreateChildFolder(parentId, name) {
+    const query = `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and name='${name.replace("'", "\\'")}' and trashed=false`;
+    const folders = await listDriveFolders(query);
+    if (folders.length) return folders[0];
+    const metadata = { name, mimeType: "application/vnd.google-apps.folder", parents: [parentId] };
+    const body = new Blob([JSON.stringify(metadata)], { type: "application/json" });
+    const res = await driveFetch("/files", { method: "POST", headers: { "Content-Type": "application/json" }, body }, false);
+    const created = await res.json();
+    return created;
+  }
+
+  async function uploadBlobToDrive(filename, blob, parentId, existingId = null) {
+    const boundary = "-------314159265358979323846";
+    const delimiter = "\r\n--" + boundary + "\r\n";
+    const closeDelimiter = "\r\n--" + boundary + "--";
+    const metadata = { name: filename, parents: [parentId] };
+    const multipartBody =
+      delimiter +
+      "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+      JSON.stringify(metadata) +
+      delimiter +
+      "Content-Type: " + (blob.type || "application/octet-stream") + "\r\n\r\n" +
+      "";
+
+    const reader = await blob.arrayBuffer();
+    const body = new Uint8Array(multipartBody.length + reader.byteLength + closeDelimiter.length);
+    let offset = 0;
+    for (let i = 0; i < multipartBody.length; i++) body[offset++] = multipartBody.charCodeAt(i);
+    body.set(new Uint8Array(reader), offset);
+    offset += reader.byteLength;
+    for (let i = 0; i < closeDelimiter.length; i++) body[offset++] = closeDelimiter.charCodeAt(i);
+
+    const path = existingId
+      ? `/files/${existingId}?uploadType=multipart`
+      : "/files?uploadType=multipart";
+    const res = await driveFetch(path, {
+      method: existingId ? "PATCH" : "POST",
+      headers: { "Content-Type": "multipart/related; boundary=" + boundary },
+      body,
+    }, true);
+    return await res.json();
+  }
+
+  function recordImageCache(fileId, dataUrl, blob, contentType) {
+    if (!fileId || !dataUrl || imageCache.has(fileId)) return;
+    imageCache.set(fileId, { dataUrl, blob, contentType });
+  }
+
+  async function downloadDriveFile(fileId) {
+    if (imageCache.has(fileId)) {
+      const cached = imageCache.get(fileId);
+      return { type: "image", data: cached.dataUrl, contentType: cached.contentType || "image/*", blob: cached.blob };
+    }
+    const res = await driveFetch(`/files/${fileId}?alt=media`, {}, false);
+    const contentType = res.headers.get("content-type") || "";
+    const blob = await res.blob();
+    if (contentType.startsWith("image/")) {
+      const dataUrl = await blobToDataUrl(blob);
+      recordImageCache(fileId, dataUrl, blob, contentType);
+      return { type: "image", data: dataUrl, contentType, blob };
+    }
+    const text = await blob.text();
+    return { type: "text", data: text, contentType, blob };
+  }
+
+  async function warmImageCacheForDocs(docs = []) {
+    const imageDocs = (docs || []).filter((d) => (d.mimeType || "").startsWith("image/"));
+    for (const doc of imageDocs) {
+      if (imageCache.has(doc.id)) continue;
+      try {
+        await downloadDriveFile(doc.id);
+      } catch (e) {
+        logLine(`Image cache warm failed for ${doc.name || doc.filename}: ${e.message}`, true);
+      }
+    }
+  }
+
+  async function deleteDriveFile(fileId) {
+    await driveFetch(`/files/${fileId}`, { method: "DELETE" });
   }
 
   function appendToConsole($content, isError = false) {
@@ -994,11 +1399,13 @@
   function loadProjectsFromStorage() {
     try {
       const raw = localStorage.getItem(PROJECTS_KEY);
-      if (raw) {
-        projects = JSON.parse(raw);
-      } else {
-        projects = {};
-      }
+      const parsed = raw ? JSON.parse(raw) : {};
+      projects = {};
+      Object.entries(parsed).forEach(([key, value]) => {
+        const cleanName = key.replace(/^novel -/i, "").trim();
+        const normalized = { ...(value || {}), name: (value && value.name) || cleanName };
+        projects[cleanName] = ensureProjectStructure(normalized);
+      });
     } catch (e) {
       logLine("Failed to load projects from localStorage: " + e, true);
       projects = {};
@@ -1007,6 +1414,114 @@
 
   function updateModelStatus() {
     $("#model-status").text(`Using: ${assistantModel}`);
+  }
+
+  async function listProjectFoldersFromDrive() {
+    const query = `mimeType='application/vnd.google-apps.folder' and name contains '${PROJECT_PREFIX}' and trashed=false`;
+    return await listDriveFolders(query);
+  }
+
+  function rememberDriveMapping(project, category, driveId, fileId) {
+    project.driveMappings = project.driveMappings || {};
+    project.driveMappings[category] = project.driveMappings[category] || {};
+    project.driveMappings[category][driveId] = fileId;
+    saveProjectsToStorage();
+  }
+
+  function forgetDriveMapping(project, category, driveId) {
+    if (project.driveMappings?.[category]) {
+      delete project.driveMappings[category][driveId];
+      saveProjectsToStorage();
+    }
+  }
+
+  async function getOrCreateProjectFolder(project) {
+    ensureProjectStructure(project);
+    if (project.drive?.rootId) return project.drive.rootId;
+    const folders = await listProjectFoldersFromDrive();
+    const match = folders.find((f) => f.name === PROJECT_PREFIX + project.name);
+    if (match) {
+      project.drive.rootId = match.id;
+      saveProjectsToStorage();
+      return match.id;
+    }
+    const metadata = { name: PROJECT_PREFIX + project.name, mimeType: "application/vnd.google-apps.folder" };
+    const body = new Blob([JSON.stringify(metadata)], { type: "application/json" });
+    const res = await driveFetch("/files", { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    const created = await res.json();
+    project.drive.rootId = created.id;
+    saveProjectsToStorage();
+    return created.id;
+  }
+
+  async function ensureCategoryFolder(project, category) {
+    ensureProjectStructure(project);
+    project.drive.categoryFolders = project.drive.categoryFolders || {};
+    if (project.drive.categoryFolders[category]) return project.drive.categoryFolders[category];
+    const rootId = await getOrCreateProjectFolder(project);
+    const folder = await findOrCreateChildFolder(rootId, category);
+    project.drive.categoryFolders[category] = folder.id;
+    saveProjectsToStorage();
+    return folder.id;
+  }
+
+  async function ensureCharacterFolder(project, characterName) {
+    const catRoot = await ensureCategoryFolder(project, CHARACTER_CATEGORY);
+    project.drive.characterFolders = project.drive.characterFolders || {};
+    if (project.drive.characterFolders[characterName]) return project.drive.characterFolders[characterName];
+    const folder = await findOrCreateChildFolder(catRoot, characterName);
+    project.drive.characterFolders[characterName] = folder.id;
+    saveProjectsToStorage();
+    return folder.id;
+  }
+
+  async function ensureProjectDriveStructure(project) {
+    await getOrCreateProjectFolder(project);
+    for (const cat of CATEGORY_FOLDERS) {
+      await ensureCategoryFolder(project, cat);
+    }
+  }
+
+  async function listDriveFiles(parentId) {
+    const params = new URLSearchParams({
+      q: `'${parentId}' in parents and trashed=false`,
+      fields: "files(id,name,mimeType,modifiedTime,size,parents)",
+      pageSize: 1000,
+    });
+    const res = await driveFetch(`/files?${params.toString()}`);
+    const data = await res.json();
+    return data.files || [];
+  }
+
+  async function autoOrganizeCharacterDocs(project) {
+    const charactersRoot = await ensureCategoryFolder(project, CHARACTER_CATEGORY);
+    const files = await listDriveFiles(charactersRoot);
+    const candidates = files.filter((f) => f.mimeType !== "application/vnd.google-apps.folder");
+    if (!candidates.length) return;
+    const knownChars = Object.keys(project.characters || {});
+    for (const file of candidates) {
+      const matchName = knownChars.find((c) => file.name.toLowerCase().includes(c.toLowerCase()));
+      if (!matchName) continue;
+      const targetFolder = await ensureCharacterFolder(project, matchName);
+      await driveFetch(`/files/${file.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ addParents: targetFolder, removeParents: charactersRoot }),
+      });
+      logLine(`Moved ${file.name} into ${matchName} folder.`);
+    }
+  }
+
+  async function syncProjectsFromDrive() {
+    const folders = await listProjectFoldersFromDrive();
+    folders.forEach((folder) => {
+      const name = folder.name.replace(PROJECT_PREFIX, "").trim();
+      projects[name] = ensureProjectStructure(projects[name] || { name });
+      projects[name].name = name;
+      projects[name].drive.rootId = folder.id;
+    });
+    saveProjectsToStorage();
+    refreshProjectListUI();
   }
 
   function loadModelPreference() {
@@ -1060,7 +1575,8 @@
     }
     names.forEach((name) => {
       const $item = $("<div>").addClass("project-item");
-      const $name = $("<span>").addClass("project-name").text(name);
+      const displayName = PROJECT_PREFIX + name;
+      const $name = $("<span>").addClass("project-name").text(displayName);
       $name.on("click", () => {
         selectProject(name);
       });
@@ -1077,11 +1593,14 @@
   }
 
   function ensureProjectStructure(project) {
+    if (project.name) project.name = project.name.replace(/^novel -/i, "").trim();
     if (!project.assistants) project.assistants = {};
     if (!project.vectorStores) project.vectorStores = {};
     if (!project.outlines) project.outlines = {};
     if (!project.chapters) project.chapters = {};
     if (!project.characters) project.characters = {};
+    if (!project.drive) project.drive = { rootId: null, categoryFolders: {}, characterFolders: {} };
+    if (!project.driveMappings) project.driveMappings = {};
     return project;
   }
 
@@ -1110,6 +1629,18 @@
     });
   }
 
+  function setCharacterMode(mode) {
+    characterConversationMode = mode === "chat" ? "chat" : "edit";
+    const editing = characterConversationMode === "edit";
+    $("#character-mode-toggle button").removeClass("active");
+    $(`#character-mode-toggle button[data-mode='${characterConversationMode}']`).addClass("active");
+    $("#canvas-document").attr("contenteditable", editing);
+    const placeholder = editing
+      ? "Ask the assistant to adjust this sheet..."
+      : "Ask questions about this character without editing their sheet...";
+    $("#canvas-user-prompt").attr("placeholder", placeholder);
+  }
+
   function refreshCharacterSelectUI(project) {
     $("#current-character-name").text(currentCharacterName || "None");
   }
@@ -1136,21 +1667,34 @@
       logLine("Project not found: " + name, true);
       return;
     }
+    if (!googleAuthorized) {
+      alert("Sign in with Google Drive first.");
+      return;
+    }
+    const project = ensureProjectStructure(projects[name]);
     currentProjectName = name;
-    $("#current-project-name").text(name);
+    $("#current-project-name").text(PROJECT_PREFIX + project.name);
     currentCharacterName = null;
     resetCharacterCanvasSession();
     hideCharacterCanvas();
     ensureDocPreviewMessage();
-    refreshCharacterSelectUI(projects[name]);
-    refreshCharacterRoster(projects[name], true).catch((e) => {
+    ensureProjectDriveStructure(project).then(() => autoOrganizeCharacterDocs(project)).catch((e) => {
+      logLine("Drive structure setup failed: " + e.message, true);
+    });
+    refreshCharacterSelectUI(project);
+    refreshCharacterRoster(project, true).catch((e) => {
       logLine("Could not refresh character roster: " + e.message, true);
     });
-    refreshStoryTargetSelectors(projects[name], true);
+    refreshStoryTargetSelectors(project, true);
     logLine("Switched to project: " + name);
     setStatus("Project " + name + " loaded.");
-    showDocCanvas(projects[name], $("#doc-category-select").val());
-    initAssistantsForProject(projects[name]).catch((e) => {
+    const setupOpen = document.getElementById("setup-docs-panel")?.open;
+    if (setupOpen) {
+      showDocCanvas(project, $("#doc-category-select").val());
+    } else {
+      hideDocCanvas();
+    }
+    initAssistantsForProject(project).catch((e) => {
       logLine("Auto-initialize assistants failed: " + e.message, true);
     });
   }
@@ -1740,6 +2284,13 @@ When asked about photos:
     return words || null;
   }
 
+  function deriveProfileName(filename) {
+    if (!filename) return null;
+    const match = filename.match(/^(.*)\s+profile\.(jpg|jpeg|png)$/i);
+    if (!match) return null;
+    return (match[1] || "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  }
+
   function renderCharacterRoster(project, roster) {
     const $grid = $("#character-grid");
     $grid.empty();
@@ -1782,33 +2333,39 @@ When asked about photos:
   }
 
   async function refreshCharacterRoster(project, silent = false) {
-    const vsId = project.vectorStores && project.vectorStores["characters"];
-    if (!vsId) {
-      renderCharacterRoster(project, []);
-      if (!silent) {
-        logLine("No character vector store yet. Upload or save a character sheet to create one.");
-      }
-      return [];
-    }
-
-    const res = await listVectorStoreFiles(vsId);
+    const docs = await fetchCategoryDocuments(project, CHARACTER_CATEGORY);
+    await warmImageCacheForDocs(docs);
     const roster = [];
-    for (const item of res.data || []) {
-      let filename = item.id;
-      try {
-        const meta = await retrieveOpenAIFile(item.id);
-        filename = meta.filename || filename;
-      } catch (e) {
-        // ignore metadata fetch failures
-      }
-      const name = deriveCharacterNameFromFilename(filename);
+    for (const doc of docs) {
+      const name = deriveCharacterNameFromFilename(doc.baseName || doc.filename);
       if (!name) continue;
-      roster.push({ name, filename, fileId: item.id });
+      roster.push({ name, filename: doc.filename, driveId: doc.id });
       const record = ensureCharacterRecord(project, name);
       record.sheet = record.sheet || {};
-      record.sheet.filename = record.sheet.filename || filename;
-      record.sheet.fileId = record.sheet.fileId || item.id;
-      record.sheet.ext = record.sheet.ext || (filename.split(".").pop() || "txt").toLowerCase();
+      record.sheet.filename = record.sheet.filename || doc.filename;
+      record.sheet.driveId = record.sheet.driveId || doc.id;
+      record.sheet.fileId = record.sheet.fileId || doc.mappedFileId || null;
+      record.sheet.ext = record.sheet.ext || (doc.baseName.split(".").pop() || "txt").toLowerCase();
+      const profileName = deriveProfileName(doc.baseName || doc.filename);
+      if (profileName) {
+        const profileRecord = ensureCharacterRecord(project, profileName);
+        const existingProfile = (profileRecord.photos || []).find((p) => p.type === "profile");
+        if (!existingProfile) {
+          try {
+            const content = await downloadDriveFile(doc.id);
+            profileRecord.photos = profileRecord.photos || [];
+            profileRecord.photos.unshift({
+              driveId: doc.id,
+              fileId: doc.mappedFileId || null,
+              filename: doc.filename,
+              type: "profile",
+              dataUrl: content.type === "image" ? content.data : null,
+            });
+          } catch (e) {
+            logLine(`Unable to cache profile photo ${doc.filename}: ${e.message}`, true);
+          }
+        }
+      }
     }
 
     renderCharacterRoster(project, roster);
@@ -1831,47 +2388,21 @@ When asked about photos:
   }
 
   async function loadCharacterAssets(project, name) {
-    const matches = [];
-    const storeEntries = Object.entries(project.vectorStores || {});
-    const seen = new Set();
-
-    for (const [category, vsId] of storeEntries) {
-      if (!vsId) continue;
-      let files = [];
-      try {
-        const res = await listVectorStoreFiles(vsId);
-        files = res.data || [];
-      } catch (e) {
-        logLine(`Failed to list files for ${category}: ${e.message}`, true);
-        continue;
-      }
-
-      for (const item of files) {
-        if (seen.has(item.id)) continue;
-        seen.add(item.id);
-        let filename = item.id;
-        try {
-          const meta = await retrieveOpenAIFile(item.id);
-          filename = meta.filename || filename;
-        } catch (e) {
-          // ignore metadata fetch failures
-        }
-        if (!filename || !filename.toLowerCase().includes(name.toLowerCase())) continue;
-        matches.push({ filename, fileId: item.id });
-      }
-    }
+    const docs = await fetchCategoryDocuments(project, CHARACTER_CATEGORY);
+    const matches = docs.filter((d) => (d.filename || "").toLowerCase().includes(name.toLowerCase()));
 
     const record = ensureCharacterRecord(project, name);
     for (const match of matches) {
       try {
         if (/character\s*sheet/i.test(match.filename) && !record?.sheet?.text) {
-          const content = await fetchOpenAIFileContent(match.fileId);
+          const content = await downloadDriveFile(match.id);
           if (content.type === "text") {
             const ext = (match.filename.split(".").pop() || "txt").toLowerCase();
             record.sheet = {
               ...(record.sheet || {}),
               text: content.data,
-              fileId: match.fileId,
+              driveId: match.id,
+              fileId: match.mappedFileId || null,
               filename: match.filename,
               ext,
             };
@@ -1880,11 +2411,12 @@ When asked about photos:
         if (/profile\.(jpg|jpeg|png)$/i.test(match.filename)) {
           const hasProfile = (record?.photos || []).some((p) => p.type === "profile");
           if (!hasProfile) {
-            const content = await fetchOpenAIFileContent(match.fileId);
+            const content = await downloadDriveFile(match.id);
             if (content.type === "image") {
               record.photos = record.photos || [];
               record.photos.unshift({
-                fileId: match.fileId,
+                driveId: match.id,
+                fileId: match.mappedFileId || null,
                 filename: match.filename,
                 type: "profile",
                 dataUrl: content.data,
@@ -1968,6 +2500,7 @@ When asked about photos:
     setCurrentCharacter(project, name);
     const record = ensureCharacterRecord(project, name);
     const attachments = await loadCharacterAssets(project, name);
+    setCharacterMode(characterConversationMode);
     openCharacterCanvas(name, record, record?.sheet?.text || "");
     if (!record?.sheet?.text) {
       setCanvasText("Character sheet will appear here for collaborative editing...");
@@ -2044,33 +2577,36 @@ When asked about photos:
   }
 
   async function persistCharacterSheet(project, record, name, text, ext) {
-    const vsId = await ensureVectorStore(project, "characters");
     const filename = `${name} Character Sheet.${ext}`;
     const blob = new Blob([text], { type: "text/plain" });
     const file = new File([blob], filename, { type: "text/plain" });
 
-    if (record.sheet?.fileId) {
+    const parentId = await ensureCharacterFolder(project, name);
+    const existingDriveId = record.sheet?.driveId || null;
+    const mappedOld = existingDriveId ? project.driveMappings?.["characters"]?.[existingDriveId] : null;
+    if (mappedOld) {
       try {
-        await deleteVectorStoreFile(vsId, record.sheet.fileId);
-        await deleteOpenAIFile(record.sheet.fileId);
+        const vsId = await ensureVectorStore(project, "characters");
+        await deleteVectorStoreFile(vsId, mappedOld);
+        await deleteOpenAIFile(mappedOld);
       } catch (e) {
         logLine("Failed to remove old sheet file: " + e.message, true);
       }
     }
 
-    const uploadRes = await uploadFileToOpenAI(file);
-    await attachFileToVectorStore(vsId, uploadRes.id);
+    const driveEntry = await storeFileWithDriveAndVector(project, "characters", filename, file, { parentId, driveId: existingDriveId });
 
     record.sheet = {
-      fileId: uploadRes.id,
+      driveId: driveEntry.id,
+      fileId: project.driveMappings?.["characters"]?.[driveEntry.id] || null,
       filename,
       ext,
       text,
     };
     saveProjectsToStorage();
     refreshCharacterRoster(project, true).catch(() => {});
-    logLine(`Saved character sheet for ${name}: ${filename} (fileId: ${uploadRes.id})`);
-    return uploadRes;
+    logLine(`Saved character sheet for ${name}: ${filename} (Drive ID: ${driveEntry.id})`);
+    return driveEntry;
   }
 
   async function downloadCharacterSheetDocx(name, text) {
@@ -2149,6 +2685,32 @@ should create one. If a category lacks files, continue using any other context a
     pushCanvasMessage("user", userPrompt);
     $("#canvas-user-prompt").val("");
     const currentSheet = getCanvasText() || record.sheet?.text || "";
+
+    if (characterConversationMode === "chat") {
+      const storySources = await buildStorySourceSummary(project);
+      const promptText = `
+You are discussing the character ${name} with the user.
+Use file_search to consult character files, storyline, outlines, drafts, and relationships for context.
+Do not rewrite the sheet; answer conversationally using the available knowledge.
+
+Current sheet (for reference only):
+${currentSheet || "(none yet)"}
+
+Story sources summary:
+${storySources}
+
+User questions or discussion points:
+${userPrompt}
+`.trim();
+      const answer = await runProjectAssistant(project, "LoreKeeper", promptText);
+      if (!answer) {
+        logLine("Assistant returned no discussion response.", true);
+        return;
+      }
+      pushCanvasMessage("assistant", answer);
+      return;
+    }
+
     const promptText = `
 You are refining the character sheet for ${name}.
 Current sheet:
@@ -2275,21 +2837,28 @@ Return the full updated sheet text only.
       : `${name} Photo ${String(galleryIndex).padStart(2, "0")}.jpg`;
     const newFile = dataUrlToFile(editedDataUrl, filename);
 
-    const vsId = await ensureVectorStore(project, "characters");
-    if (targetPhoto?.fileId) {
-      try {
-        await deleteVectorStoreFile(vsId, targetPhoto.fileId);
-        await deleteOpenAIFile(targetPhoto.fileId);
-      } catch (e) {
-        logLine("Failed to remove old photo file: " + e.message, true);
+    const parentId = await ensureCharacterFolder(project, name);
+    if (targetPhoto?.driveId) {
+      const mapped = project.driveMappings?.["characters"]?.[targetPhoto.driveId];
+      if (mapped) {
+        try {
+          const vsId = await ensureVectorStore(project, "characters");
+          await deleteVectorStoreFile(vsId, mapped);
+          await deleteOpenAIFile(mapped);
+        } catch (e) {
+          logLine("Failed to remove old photo file: " + e.message, true);
+        }
       }
     }
 
-    const uploadRes = await uploadFileToOpenAI(newFile);
-    await attachFileToVectorStore(vsId, uploadRes.id);
+    const driveEntry = await storeFileWithDriveAndVector(project, "characters", filename, newFile, {
+      parentId,
+      driveId: targetPhoto?.driveId,
+    });
 
     const entry = {
-      fileId: uploadRes.id,
+      driveId: driveEntry.id,
+      fileId: project.driveMappings?.["characters"]?.[driveEntry.id] || null,
       filename,
       type: isProfile ? "profile" : "gallery",
       dataUrl: editedDataUrl,
@@ -2310,7 +2879,7 @@ Return the full updated sheet text only.
     }
 
     saveProjectsToStorage();
-    logLine(`Saved ${isProfile ? "profile" : "gallery"} image for ${name}: ${filename} (fileId: ${uploadRes.id})`);
+    logLine(`Saved ${isProfile ? "profile" : "gallery"} image for ${name}: ${filename} (Drive ID: ${driveEntry.id})`);
     if (fileInput) fileInput.value = "";
     if ($("#character-canvas").hasClass("visible") && currentCharacterName === name) {
       renderCharacterGallery(record);
@@ -2384,28 +2953,33 @@ Using the trilogy outline (if available) and all project lore:
     project.outlines = project.outlines || {};
     const key = "book_" + bookNumber;
     const old = project.outlines[key];
-    if (old && old.fileId) {
+    const parentId = await ensureCategoryFolder(project, "outlines");
+    const mappedOld = old?.driveId ? project.driveMappings?.["outlines"]?.[old.driveId] : old?.fileId;
+    if (mappedOld) {
       try {
-        await deleteOpenAIFile(old.fileId);
-        logLine("Deleted old outline file from OpenAI: " + old.fileId);
+        const vsId = await ensureVectorStore(project, "outlines");
+        await deleteVectorStoreFile(vsId, mappedOld);
+        await deleteOpenAIFile(mappedOld);
       } catch (e) {
         logLine("Failed to delete old outline file: " + e, true);
       }
     }
 
-    const vsId = await ensureVectorStore(project, "outlines");
     const jsonBlob = new Blob([JSON.stringify(outlineJson, null, 2)], { type: "application/json" });
     const jsonFile = new File([jsonBlob], `book_${bookNumber}_outline.json`, { type: "application/json" });
-    const fileRes = await uploadFileToOpenAI(jsonFile);
-    await attachFileToVectorStore(vsId, fileRes.id);
+    const driveEntry = await storeFileWithDriveAndVector(project, "outlines", jsonFile.name, jsonFile, {
+      parentId,
+      driveId: old?.driveId,
+    });
 
     project.outlines[key] = {
-      fileId: fileRes.id,
+      driveId: driveEntry.id,
+      fileId: project.driveMappings?.["outlines"]?.[driveEntry.id] || null,
       json: outlineJson,
     };
     saveProjectsToStorage();
     refreshStoryTargetSelectors(project, true);
-    logLine("Book " + bookNumber + " outline stored and uploaded. FileId: " + fileRes.id);
+    logLine("Book " + bookNumber + " outline stored to Drive and vector store.");
 
     const dlBlob = new Blob([JSON.stringify(outlineJson, null, 2)], { type: "application/json" });
     const dlUrl = URL.createObjectURL(dlBlob);
@@ -2493,32 +3067,39 @@ Please write the full chapter, following your system-level drafting rules.
     project.chapters = project.chapters || {};
     const key = chapterKey(bookNumber, act, chapterNum);
     const old = project.chapters[key];
-    if (old && old.fileId) {
+
+    const draftsParent = await ensureCategoryFolder(project, "drafts");
+    await ensureVectorStore(project, "drafts");
+    const existingDriveId = old?.driveId;
+    const mappedOld = existingDriveId ? project.driveMappings?.["drafts"]?.[existingDriveId] : old?.fileId;
+    if (mappedOld) {
       try {
-        await deleteOpenAIFile(old.fileId);
-        logLine("Deleted old chapter file from OpenAI: " + old.fileId);
+        const vsId = await ensureVectorStore(project, "drafts");
+        await deleteVectorStoreFile(vsId, mappedOld);
+        await deleteOpenAIFile(mappedOld);
       } catch (e) {
         logLine("Failed to delete old chapter file: " + e, true);
       }
     }
-
-    const vsId = await ensureVectorStore(project, "drafts");
     const textBlob = new Blob([chapterText], { type: "text/markdown" });
     const textFile = new File(
       [textBlob],
       `book${bookNumber}_act${act}_chapter${chapterNum}_draft.md`,
       { type: "text/markdown" }
     );
-    const fileRes = await uploadFileToOpenAI(textFile);
-    await attachFileToVectorStore(vsId, fileRes.id);
+    const driveEntry = await storeFileWithDriveAndVector(project, "drafts", textFile.name, textFile, {
+      parentId: draftsParent,
+      driveId: existingDriveId,
+    });
 
     project.chapters[key] = {
-      fileId: fileRes.id,
+      driveId: driveEntry.id,
+      fileId: project.driveMappings?.["drafts"]?.[driveEntry.id] || null,
       text: chapterText,
     };
     saveProjectsToStorage();
 
-    logLine(`Drafted chapter: Book ${bookNumber}, Act ${act}, Chapter ${chapterNum}. FileId: ${fileRes.id}`);
+    logLine(`Drafted chapter: Book ${bookNumber}, Act ${act}, Chapter ${chapterNum}. DriveId: ${driveEntry.id}`);
 
     const dlBlob = new Blob([chapterText], { type: "text/markdown" });
     const dlUrl = URL.createObjectURL(dlBlob);
@@ -2603,10 +3184,13 @@ Please write the full chapter now, following your system-level drafting rules.
 
           const key = chapterKey(bookNumber, actNum, chNum);
           const old = project.chapters[key];
-          if (old && old.fileId) {
+          const existingDriveId = old?.driveId;
+          const mappedOld = existingDriveId ? project.driveMappings?.["drafts"]?.[existingDriveId] : old?.fileId;
+          if (mappedOld) {
             try {
-              await deleteOpenAIFile(old.fileId);
-              logLine("Deleted old chapter file from OpenAI: " + old.fileId);
+              const vsId = await ensureVectorStore(project, "drafts");
+              await deleteVectorStoreFile(vsId, mappedOld);
+              await deleteOpenAIFile(mappedOld);
             } catch (e) {
               logLine("Failed to delete old chapter file: " + e, true);
             }
@@ -2615,16 +3199,19 @@ Please write the full chapter now, following your system-level drafting rules.
           const textBlob = new Blob([chapterText], { type: "text/markdown" });
           const fileName = `book${bookNumber}_act${actNum}_chapter${chNum}_draft.md`;
           const textFile = new File([textBlob], fileName, { type: "text/markdown" });
-          const fileRes = await uploadFileToOpenAI(textFile);
-          await attachFileToVectorStore(vsId, fileRes.id);
+          const driveEntry = await storeFileWithDriveAndVector(project, "drafts", fileName, textFile, {
+            parentId: draftsParent,
+            driveId: existingDriveId,
+          });
 
           project.chapters[key] = {
-            fileId: fileRes.id,
+            driveId: driveEntry.id,
+            fileId: project.driveMappings?.["drafts"]?.[driveEntry.id] || null,
             text: chapterText,
           };
           saveProjectsToStorage();
 
-          logLine(`Drafted Book ${bookNumber}, Act ${actNum}, Chapter ${chNum}. FileId: ${fileRes.id}`);
+          logLine(`Drafted Book ${bookNumber}, Act ${actNum}, Chapter ${chNum}. DriveId: ${driveEntry.id}`);
         } catch (e) {
           logLine(`Error drafting Book ${bookNumber}, Act ${actNum}, Chapter ${chNum}: ` + e.message, true);
         }
@@ -2708,12 +3295,14 @@ CORRECTED CHAPTER:
     project.chapters[key] = project.chapters[key] || {};
     project.chapters[key].text = finalText;
 
-    const vsId = await ensureVectorStore(project, "drafts");
-    const oldFileId = project.chapters[key].fileId;
-    if (oldFileId) {
+    const parentId = await ensureCategoryFolder(project, "drafts");
+    const existingDriveId = project.chapters[key].driveId;
+    const mappedOld = existingDriveId ? project.driveMappings?.["drafts"]?.[existingDriveId] : project.chapters[key].fileId;
+    if (mappedOld) {
       try {
-        await deleteOpenAIFile(oldFileId);
-        logLine("Deleted old OpenAI file for chapter: " + oldFileId);
+        const vsId = await ensureVectorStore(project, "drafts");
+        await deleteVectorStoreFile(vsId, mappedOld);
+        await deleteOpenAIFile(mappedOld);
       } catch (e) {
         logLine("Failed to delete old file: " + e, true);
       }
@@ -2722,13 +3311,16 @@ CORRECTED CHAPTER:
     const textBlob = new Blob([finalText], { type: "text/markdown" });
     const fileName = `book${bookNumber}_act${act}_chapter${chapterNum}_edited_with_continuity.md`;
     const textFile = new File([textBlob], fileName, { type: "text/markdown" });
-    const fileRes = await uploadFileToOpenAI(textFile);
-    await attachFileToVectorStore(vsId, fileRes.id);
+    const driveEntry = await storeFileWithDriveAndVector(project, "drafts", fileName, textFile, {
+      parentId,
+      driveId: existingDriveId,
+    });
 
-    project.chapters[key].fileId = fileRes.id;
+    project.chapters[key].driveId = driveEntry.id;
+    project.chapters[key].fileId = project.driveMappings?.["drafts"]?.[driveEntry.id] || null;
     saveProjectsToStorage();
 
-    logLine(`Edited chapter stored. FileId: ${fileRes.id}`);
+    logLine(`Edited chapter stored. Drive Id: ${driveEntry.id}`);
 
     const dlUrl = URL.createObjectURL(textBlob);
     const $link = $("<a>")
@@ -2890,6 +3482,50 @@ Please:
   // DOC / VECTOR STORE UI ACTIONS
   // ==============================
 
+  async function pushDriveFileToVectorStore(project, category, driveFile) {
+    const content = await downloadDriveFile(driveFile.id);
+    const vsId = await ensureVectorStore(project, category);
+    const fileObj = new File([content.blob], driveFile.name, { type: content.blob.type || "application/octet-stream" });
+    const uploadRes = await uploadFileToOpenAI(fileObj);
+    await attachFileToVectorStore(vsId, uploadRes.id);
+    rememberDriveMapping(project, category, driveFile.id, uploadRes.id);
+    return uploadRes.id;
+  }
+
+  async function storeFileWithDriveAndVector(project, category, filename, blob, options = {}) {
+    const parentId = options.parentId || (await ensureCategoryFolder(project, category));
+    const driveEntry = await uploadBlobToDrive(filename, blob, parentId, options.driveId || null);
+    await pushDriveFileToVectorStore(project, category, driveEntry);
+    return driveEntry;
+  }
+
+  async function resyncCategoryFromDrive(project, category) {
+    const vsId = await ensureVectorStore(project, category);
+    try {
+      const existing = await listVectorStoreFiles(vsId);
+      for (const entry of existing.data || []) {
+        try {
+          await deleteVectorStoreFile(vsId, entry.id);
+          await deleteOpenAIFile(entry.id);
+        } catch (e) {
+          logLine(`Unable to remove stale vector store file ${entry.id}: ${e.message}`, true);
+        }
+      }
+    } catch (e) {
+      logLine(`Unable to flush vector store for ${category}: ${e.message}`, true);
+    }
+
+    project.driveMappings = project.driveMappings || {};
+    project.driveMappings[category] = {};
+    const docs = await fetchCategoryDocuments(project, category);
+    for (const doc of docs) {
+      await pushDriveFileToVectorStore(project, category, { id: doc.id, name: doc.baseName });
+    }
+    saveProjectsToStorage();
+    await renderDocExplorer(project, category);
+    logLine(`Resynced ${category} from Drive into vector store.`);
+  }
+
   async function uploadDocsForCategory(project) {
     const category = $("#doc-category-select").val();
     const files = $("#file-upload-input")[0].files;
@@ -2903,13 +3539,14 @@ Please:
   }
 
   async function uploadDocumentsToCategory(project, category, fileList) {
-    const vsId = await ensureVectorStore(project, category);
+    let parentId = null;
+    if (category === CHARACTER_CATEGORY && currentCharacterName) {
+      parentId = await ensureCharacterFolder(project, currentCharacterName);
+    }
     for (const file of fileList) {
       try {
         logLine(`Uploading file "${file.name}" for category "${category}"...`);
-        const fileRes = await uploadFileToOpenAI(file);
-        await attachFileToVectorStore(vsId, fileRes.id);
-        logLine(`Uploaded fileId=${fileRes.id} into vector_store=${vsId}`);
+        await storeFileWithDriveAndVector(project, category, file.name, file, { parentId });
       } catch (e) {
         logLine("Error uploading file: " + e.message, true);
       }
@@ -2918,63 +3555,33 @@ Please:
 
   async function listFilesInCategory(project) {
     const category = $("#doc-category-select").val();
-    const vsId = project.vectorStores && project.vectorStores[category];
-    if (!vsId) {
-      logLine("No vector store for category '" + category + "'.", true);
-      return;
-    }
-    logLine(`Listing files for category '${category}' (vs: ${vsId})...`);
-    const files = await loadCategoryFileOptions(project, category);
+    const files = await fetchCategoryDocuments(project, category);
     if (!files.length) {
-      logLine("No files in that vector store.");
+      logLine("No files found in Drive for this category.");
       return;
     }
     files.forEach((item) => {
-      logLine(`  fileId=${item.id} | filename=${item.filename} | status=${item.status}`);
+      logLine(`  driveId=${item.id} | filename=${item.filename} | mimeType=${item.mimeType}`);
     });
   }
 
   async function loadCategoryFileOptions(project, category) {
-    const vsId = project.vectorStores && project.vectorStores[category];
     const $sel = $("#category-file-select");
     $sel.empty();
-    if (!vsId) {
-      $sel.append($("<option>").val("").text("(no vector store)"));
+    const parentId = await ensureCategoryFolder(project, category);
+    const files = await listDriveFiles(parentId);
+    if (!files.length) {
+      $sel.append($("<option>").val("").text("(no files)"));
       return [];
     }
-    const res = await listVectorStoreFiles(vsId);
-    const results = [];
-    if (!res.data || !res.data.length) {
-      $sel.append($("<option>").val("").text("(no files)"));
-      return results;
-    }
-    for (const item of res.data) {
-      let filename = item.id;
-      try {
-        const meta = await retrieveOpenAIFile(item.id);
-        filename = meta.filename || filename;
-      } catch (e) {
-        // ignore
-      }
-      results.push({ id: item.id, filename, status: item.status });
-    }
-    results.forEach((r) => {
-      $sel.append(
-        $("<option>")
-          .val(r.id)
-          .text(`${r.filename} (${r.status})`)
-      );
+    files.forEach((item) => {
+      $sel.append($("<option>").val(item.id).text(`${item.name}`));
     });
-    return results;
+    return files.map((f) => ({ id: f.id, filename: f.name }));
   }
 
   async function removeFileFromCategory(project) {
     const category = $("#doc-category-select").val();
-    const vsId = project.vectorStores && project.vectorStores[category];
-    if (!vsId) {
-      logLine("No vector store for category '" + category + "'.", true);
-      return;
-    }
     const files = await loadCategoryFileOptions(project, category);
     if (!files.length) {
       logLine("No files available to remove.", true);
@@ -2982,17 +3589,23 @@ Please:
     }
     const choice = await showSelectModal(
       `Remove file from ${category}`,
-      files.map((f) => ({ value: f.id, label: `${f.filename} (${f.status})` }))
+      files.map((f) => ({ value: f.id, label: f.filename }))
     );
     if (!choice) return;
-    const fileId = choice;
+    const driveId = choice;
     try {
-      await deleteVectorStoreFile(vsId, fileId);
-      logLine("Removed file from vector store: " + fileId);
-      if (confirm("Also delete this file from OpenAI files?")) {
-        await deleteOpenAIFile(fileId);
-        logLine("Deleted file from OpenAI: " + fileId);
+      const mapped = project.driveMappings?.[category]?.[driveId];
+      if (mapped) {
+        try {
+          await deleteVectorStoreFile(project.vectorStores[category], mapped);
+          await deleteOpenAIFile(mapped);
+        } catch (e) {
+          logLine("Failed to remove OpenAI mapping: " + e.message, true);
+        }
       }
+      await deleteDriveFile(driveId);
+      forgetDriveMapping(project, category, driveId);
+      logLine("Removed file from Drive and vector store.");
       await renderDocExplorer(project, category);
     } catch (e) {
       logLine("Error removing file: " + e.message, true);
@@ -3016,28 +3629,104 @@ Please:
     $("#doc-preview").empty().text(msg || "Select a document to preview its contents here.");
   }
 
-  async function fetchCategoryDocuments(project, category) {
-    const vsId = project.vectorStores && project.vectorStores[category];
-    if (!vsId) return [];
-    const res = await listVectorStoreFiles(vsId);
-    const docs = [];
-    for (const item of res.data || []) {
-      let meta = {};
-      try {
-        meta = await retrieveOpenAIFile(item.id);
-      } catch (e) {
-        // continue with minimal info
+  function handlePanelVisibility(panelId) {
+    const project = getCurrentProject();
+    if (panelId === "setup-docs-panel") {
+      if (project) {
+        showDocCanvas(project, $("#doc-category-select").val());
       }
-      const filename = meta.filename || item.id;
-      const createdAt = meta.created_at ? new Date(meta.created_at * 1000) : null;
-      docs.push({
-        id: item.id,
-        filename,
-        status: item.status,
-        bytes: meta.bytes || 0,
-        createdAt,
-      });
+      hideCharacterCanvas();
+    } else if (panelId === "character-panel") {
+      hideDocCanvas();
+      const name = project ? currentCharacterName || getActiveCharacterName(project) : null;
+      if (project && name) {
+        openCharacterCanvas(name, ensureCharacterRecord(project, name));
+      }
+    } else {
+      hideDocCanvas();
+      hideCharacterCanvas();
     }
+  }
+
+  function collapseAllMenuPanels() {
+    suppressMenuToggle = true;
+    $(".menu-panel").each(function () {
+      this.open = false;
+      $(this).removeClass("active");
+    });
+    suppressMenuToggle = false;
+    hideDocCanvas();
+    hideCharacterCanvas();
+  }
+
+  function activateMenuPanel(panelId) {
+    suppressMenuToggle = true;
+    $(".menu-panel").each(function () {
+      if (this.id !== panelId) {
+        this.open = false;
+        $(this).removeClass("active");
+      }
+    });
+    const target = document.getElementById(panelId);
+    if (target) {
+      target.open = true;
+      $(target).addClass("active");
+      handlePanelVisibility(panelId);
+    }
+    suppressMenuToggle = false;
+  }
+
+  async function bootstrapAfterGoogleAuth() {
+    const authed = await ensureGoogleAuthorized();
+    if (!authed) return;
+    try {
+      await syncProjectsFromDrive();
+      refreshProjectListUI();
+      const existingNames = Object.keys(projects || {});
+      const preferred = currentProjectName && projects[currentProjectName] ? currentProjectName : existingNames[0];
+      if (preferred) {
+        selectProject(preferred);
+      } else {
+        ensureDocPreviewMessage();
+      }
+      const who = googleUserEmail ? ` (${googleUserEmail})` : "";
+      setAuthStatus(`Connected to Google Drive${who}.`);
+      setAppLocked(false);
+    } catch (e) {
+      logLine("Failed to initialize Drive workspace: " + e.message, true);
+      setAuthStatus("Drive setup failed: " + e.message);
+    }
+  }
+
+  async function fetchCategoryDocuments(project, category) {
+    const parentId = await ensureCategoryFolder(project, category);
+    const files = await listDriveFiles(parentId);
+    const docs = [];
+
+    const pushDoc = (file, prefix = null) => {
+      const display = prefix ? `${prefix}/${file.name}` : file.name;
+      docs.push({
+        id: file.id,
+        filename: display,
+        baseName: file.name,
+        mimeType: file.mimeType,
+        modifiedAt: file.modifiedTime ? new Date(file.modifiedTime) : null,
+        mappedFileId: project.driveMappings?.[category]?.[file.id] || null,
+      });
+    };
+
+    for (const file of files) {
+      if (file.mimeType === "application/vnd.google-apps.folder" && category === CHARACTER_CATEGORY) {
+        const nested = await listDriveFiles(file.id);
+        nested
+          .filter((f) => f.mimeType !== "application/vnd.google-apps.folder")
+          .forEach((child) => pushDoc(child, file.name));
+        continue;
+      }
+      if (file.mimeType === "application/vnd.google-apps.folder") continue;
+      pushDoc(file);
+    }
+
     return docs;
   }
 
@@ -3045,11 +3734,12 @@ Please:
     const $list = $("#doc-list");
     $list.empty();
     const docs = await fetchCategoryDocuments(project, category);
+    await warmImageCacheForDocs(docs);
 
     const $header = $("<div>").addClass("doc-row doc-row-header");
     $header.append($("<div>").text("Name"));
-    $header.append($("<div>").text("Date"));
-    $header.append($("<div>").text("Size (KB)"));
+    $header.append($("<div>").text("Type"));
+    $header.append($("<div>").text("Updated"));
     $header.append($("<div>").text("Actions"));
     $list.append($header);
 
@@ -3066,32 +3756,35 @@ Please:
     docs.forEach((doc) => {
       const $row = $("<div>").addClass("doc-row");
       $row.append($("<div>").text(doc.filename));
-      const dateText = doc.createdAt ? doc.createdAt.toLocaleString() : "Unknown";
+      $row.append($("<div>").text(doc.mimeType || "unknown"));
+      const dateText = doc.modifiedAt ? doc.modifiedAt.toLocaleString() : "Unknown";
       $row.append($("<div>").text(dateText));
-      const kb = doc.bytes ? (doc.bytes / 1024).toFixed(1) : "-";
-      $row.append($("<div>").text(kb));
       const $actions = $("<div>").addClass("doc-actions");
-      const $view = $("<button>").text("🔍 View");
+      const $view = $("<button>").addClass("icon-button").attr("title", "Stream / view").text("👁️");
       const $delete = $("<button>").text("🗑️ Delete");
 
       $view.on("click", async () => {
+        ensureDocPreviewMessage("Loading preview...");
         try {
-          await previewDocument(project, doc);
+          await viewDriveDocument(project, doc);
         } catch (e) {
           logLine("Error previewing document: " + e.message, true);
         }
       });
 
       $delete.on("click", async () => {
-        const confirmDelete = confirm(`Delete ${doc.filename} from ${category}? This removes it from OpenAI storage.`);
+        const confirmDelete = confirm(`Delete ${doc.filename} from ${category}? This removes it from Google Drive and the vector store.`);
         if (!confirmDelete) return;
-        const vsId = project.vectorStores && project.vectorStores[category];
         try {
-          if (vsId) {
-            await deleteVectorStoreFile(vsId, doc.id);
+          const mapped = project.driveMappings?.[category]?.[doc.id];
+          if (mapped) {
+            const vsId = project.vectorStores && project.vectorStores[category];
+            if (vsId) await deleteVectorStoreFile(vsId, mapped);
+            await deleteOpenAIFile(mapped);
           }
-          await deleteOpenAIFile(doc.id);
-          logLine(`Deleted ${doc.filename} (${doc.id}).`);
+          await deleteDriveFile(doc.id);
+          forgetDriveMapping(project, category, doc.id);
+          logLine(`Deleted ${doc.filename} from Drive.`);
           await renderDocExplorer(project, category);
         } catch (e) {
           logLine("Error deleting document: " + e.message, true);
@@ -3104,8 +3797,35 @@ Please:
     });
   }
 
-  async function previewDocument(project, doc) {
-    const content = await fetchOpenAIFileContent(doc.id);
+  function showImageModal(dataUrl, caption) {
+    const $modal = $("#image-viewer");
+    $("#image-viewer-img").attr("src", dataUrl || "");
+    $("#image-viewer-caption").text(caption || "");
+    $modal.addClass("visible");
+  }
+
+  function hideImageModal() {
+    $("#image-viewer").removeClass("visible");
+    $("#image-viewer-img").attr("src", "");
+    $("#image-viewer-caption").text("");
+  }
+
+  async function viewDriveDocument(project, doc) {
+    const content = await downloadDriveFile(doc.id);
+    await previewDocument(project, doc, content);
+    if (content.type === "image") {
+      showImageModal(content.data, doc.filename);
+      return;
+    }
+
+    const blob = content.blob || new Blob([content.data || ""], { type: content.contentType || "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
+  async function previewDocument(project, doc, existingContent = null) {
+    const content = existingContent || (await downloadDriveFile(doc.id));
     const $preview = $("#doc-preview");
     $preview.empty();
     if (content.type === "text") {
@@ -3136,18 +3856,32 @@ Please:
     loadProjectsFromStorage();
     loadModelPreference();
     refreshProjectListUI();
-    const initialProject = currentProjectName && projects[currentProjectName] ? projects[currentProjectName] : { characters: {} };
-    refreshCharacterSelectUI(initialProject);
-    refreshCharacterRoster(initialProject, true);
-    refreshStoryTargetSelectors(initialProject, true);
+    refreshCharacterSelectUI({ characters: {} });
+    refreshStoryTargetSelectors({ chapters: {}, outlines: {} }, true);
     setConsoleExpanded(false);
     $("#api-key-input").val(apiKey);
     $("#api-key-status").text("Preloaded test key (change as needed)");
     logLine("API key preloaded for testing. Replace or clear as needed.");
-    logLine("Novel Studio HTML client loaded.");
-    setStatus("Ready.");
+    logLine("Novel Studio HTML client loaded. Sign in with Google Drive to begin.");
+    setStatus("Connect Google Drive to begin.");
     ensureDocPreviewMessage();
-    showDocCanvas(initialProject, $("#doc-category-select").val());
+    setAppLocked(true);
+    setCharacterMode(characterConversationMode);
+    collapseAllMenuPanels();
+
+    $("#google-auth-btn").on("click", async function () {
+      await bootstrapAfterGoogleAuth();
+    });
+
+    $("#image-viewer-close").on("click", hideImageModal);
+    $("#image-viewer").on("click", function (e) {
+      if (e.target === this) hideImageModal();
+    });
+
+    $("#character-mode-toggle button").on("click", function () {
+      const mode = $(this).data("mode");
+      setCharacterMode(mode);
+    });
 
     $("#model-select").on("change", function () {
       const model = $(this).val();
@@ -3179,6 +3913,17 @@ Please:
       showDocCanvas(project, $("#doc-category-select").val());
     });
 
+    $("#doc-resync-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      const category = $("#doc-category-select").val();
+      try {
+        await resyncCategoryFromDrive(project, category);
+      } catch (e) {
+        logLine("Failed to resync category: " + e.message, true);
+      }
+    });
+
     $("#doc-canvas-upload").on("change", async function (e) {
       const project = getCurrentProject();
       if (!project) return;
@@ -3196,34 +3941,19 @@ Please:
       }
     });
 
-    $("#setup-docs-panel").on("toggle", function () {
-      const project = getCurrentProject();
+    $(".menu-panel").on("toggle", function () {
+      if (suppressMenuToggle) return;
       if (this.open) {
-        if (project) {
-          showDocCanvas(project, $("#doc-category-select").val());
-        }
+        activateMenuPanel(this.id);
       } else {
-        hideDocCanvas();
-        const charPanel = document.getElementById("character-panel");
-        const charOpen = charPanel ? charPanel.open : false;
-        const activeName = project ? currentCharacterName || getActiveCharacterName(project) : null;
-        if (charOpen && project && activeName) {
-          openCharacterCanvas(activeName, ensureCharacterRecord(project, activeName));
+        $(this).removeClass("active");
+        if (this.id === "character-panel") {
+          hideCharacterCanvas();
+          resetCharacterCanvasSession();
         }
-      }
-    });
-
-    $("#character-panel").on("toggle", function () {
-      if (this.open) {
-        hideDocCanvas();
-        const project = getCurrentProject();
-        const name = currentCharacterName || getActiveCharacterName(project || {});
-        if (project && name) {
-          openCharacterCanvas(name, ensureCharacterRecord(project, name));
+        if (this.id === "setup-docs-panel") {
+          hideDocCanvas();
         }
-      } else {
-        hideCharacterCanvas();
-        resetCharacterCanvasSession();
       }
     });
 
@@ -3250,23 +3980,26 @@ Please:
       }
     });
 
-    $("#create-project-btn").on("click", function () {
+    $("#create-project-btn").on("click", async function () {
+      const authed = await ensureGoogleAuthorized();
+      if (!authed) return;
       let rawName = $("#new-project-name").val().trim();
       if (!rawName) {
         rawName = "untitled";
       }
-      let name = rawName.startsWith("novel -") ? rawName : "novel - " + rawName;
-      if (projects[name]) {
+      const cleanName = rawName.replace(/^novel -/i, "").trim();
+      if (projects[cleanName]) {
         alert("Project already exists with that name.");
         return;
       }
-      projects[name] = ensureProjectStructure({
-        name: name,
+      projects[cleanName] = ensureProjectStructure({
+        name: cleanName,
       });
+      await ensureProjectDriveStructure(projects[cleanName]);
       saveProjectsToStorage();
       refreshProjectListUI();
-      refreshCharacterSelectUI(projects[name]);
-      selectProject(name);
+      refreshCharacterSelectUI(projects[cleanName]);
+      selectProject(cleanName);
       $("#new-project-name").val("");
     });
 
@@ -3275,7 +4008,7 @@ Please:
         alert("No project currently selected.");
         return;
       }
-      if (!confirm("Delete project '" + currentProjectName + "' from localStorage? This does NOT delete OpenAI resources.")) {
+      if (!confirm("Delete project '" + currentProjectName + "' from localStorage? This does NOT delete Google Drive or OpenAI resources.")) {
         return;
       }
       delete projects[currentProjectName];
