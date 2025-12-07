@@ -1246,9 +1246,11 @@
   let googleAuthorized = false;
   let googleDriveReady = false;
   let googleInitPromise = null;
-let googleUserEmail = null;
+  let googleSdkLoadPromise = null;
+  let googleUserEmail = null;
 
   function resetGoogleSdkState() {
+    logLine("resetGoogleSdkState: begin");
     googleDriveReady = false;
     googleInitPromise = null;
     googleSdkLoadPromise = null;
@@ -1257,7 +1259,8 @@ let googleUserEmail = null;
       const existing = document.getElementById(id);
       if (existing) existing.remove();
     });
-    logLine("Google SDK state cleared. Reloading scripts is now allowed.");
+    logLine("resetGoogleSdkState: Google SDK state cleared. Reloading scripts is now allowed.");
+    logLine("resetGoogleSdkState: end");
   }
   let projects = {}; // { projectName: {name, assistants, vectorStores, outlines, chapters} }
   let currentProjectName = null;
@@ -1362,6 +1365,7 @@ let googleUserEmail = null;
   }
 
   function ensureDriveConfigPresent() {
+    logLine("ensureDriveConfigPresent: begin");
     if (isFileOrigin) {
       throw new Error(
         "Google OAuth blocks the file:// origin. Serve novel_studio.html from http(s) (e.g., `python3 -m http.server`) to sign in."
@@ -1379,8 +1383,31 @@ let googleUserEmail = null;
       loggedLocalhostHint = true;
     }
     if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.includes("YOUR_")) {
+      logLine("ensureDriveConfigPresent: GOOGLE_CLIENT_ID missing or placeholder.", true);
       throw new Error("Set GOOGLE_CLIENT_ID to a valid OAuth client id for Google Drive.");
     }
+    logLine("ensureDriveConfigPresent: end");
+  }
+
+  async function waitForGoogleSdk() {
+    if (googleSdkLoadPromise) return googleSdkLoadPromise;
+    logLine("waitForGoogleSdk: begin loading Google SDK scripts.");
+    googleSdkLoadPromise = (async () => {
+      logLine("waitForGoogleSdk: loading Google Identity Services script...");
+      await loadGoogleScript(
+        "google-gsi-script",
+        "https://accounts.google.com/gsi/client",
+        () => !!window.google?.accounts?.oauth2
+      );
+      logLine("waitForGoogleSdk: loading Google API client script...");
+      await loadGoogleScript("google-gapi-script", "https://apis.google.com/js/api.js", () => !!window.gapi?.client);
+      logLine("waitForGoogleSdk: all Google scripts reported loaded.");
+    })().catch((err) => {
+      logLine("waitForGoogleSdk: failed to load Google SDK: " + err.message, true);
+      googleSdkLoadPromise = null;
+      throw err;
+    });
+    return googleSdkLoadPromise;
   }
 
   function loadGoogleScript(id, src, checkLoaded) {
@@ -1427,6 +1454,7 @@ let googleUserEmail = null;
   }
 
   async function prepareGoogleSdk() {
+    logLine("prepareGoogleSdk: begin");
     if (googleDriveReady) return;
     if (!googleInitPromise) {
       googleInitPromise = (async () => {
@@ -1439,6 +1467,7 @@ let googleUserEmail = null;
         googleDriveReady = true;
         logLine("Google Drive SDK ready.");
         setAuthStatus("Google SDK ready. Sign in to continue.");
+        logLine("prepareGoogleSdk: end (ready)");
       })().catch((err) => {
         const message = err?.message || "Google SDK failed to load";
         logLine("Google SDK initialization failed: " + message, true);
@@ -1450,6 +1479,7 @@ let googleUserEmail = null;
   }
 
   function initGoogleTokenClient() {
+    logLine("initGoogleTokenClient: begin");
     if (googleTokenClient) return googleTokenClient;
     ensureDriveConfigPresent();
     googleTokenClient = google.accounts.oauth2.initTokenClient({
@@ -1457,10 +1487,12 @@ let googleUserEmail = null;
       scope: GOOGLE_SCOPES,
       callback: () => {},
     });
+    logLine("initGoogleTokenClient: end (client created)");
     return googleTokenClient;
   }
 
   async function requestGoogleAuth(interactive = true) {
+    logLine(`requestGoogleAuth: begin (interactive=${interactive})`);
     if (!googleDriveReady) {
       await prepareGoogleSdk();
       if (!googleDriveReady) {
@@ -1480,6 +1512,7 @@ let googleUserEmail = null;
         gapi.client.setToken({ access_token: googleAccessToken });
         await fetchGoogleProfile();
         setAuthStatus("Authorized. Loading Drive projects...");
+        logLine("requestGoogleAuth: authorization successful.");
         resolve(resp);
       };
       googleTokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
@@ -1487,17 +1520,21 @@ let googleUserEmail = null;
   }
 
   async function ensureGoogleAuthorized() {
+    logLine("ensureGoogleAuthorized: begin");
     if (googleAuthorized && googleAccessToken) return true;
     try {
       await requestGoogleAuth(true);
+      logLine("ensureGoogleAuthorized: authorized");
       return true;
     } catch (e) {
       logLine("Google auth required: " + e.message, true);
+      logLine("ensureGoogleAuthorized: failed");
       return false;
     }
   }
 
   async function fetchGoogleProfile() {
+    logLine("fetchGoogleProfile: begin");
     if (!googleAccessToken) return null;
     try {
       const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
@@ -1506,13 +1543,16 @@ let googleUserEmail = null;
       if (res.ok) {
         const data = await res.json();
         googleUserEmail = data.email || null;
+        logLine(`fetchGoogleProfile: email=${googleUserEmail || "unknown"}`);
       }
     } catch (e) {
       // ignore profile fetch failures
     }
+    logLine("fetchGoogleProfile: end");
   }
 
   async function driveFetch(path, options = {}, upload = false) {
+    logLine(`driveFetch: begin path=${path} upload=${upload}`);
     if (!googleAccessToken) throw new Error("Google Drive token missing");
     const base = upload ? "https://www.googleapis.com/upload/drive/v3" : "https://www.googleapis.com/drive/v3";
     const headers = options.headers || {};
@@ -1520,8 +1560,10 @@ let googleUserEmail = null;
     const res = await fetch(base + path, { ...options, headers });
     if (!res.ok) {
       const text = await res.text();
+      logLine(`driveFetch: error status=${res.status} path=${path}`, true);
       throw new Error(`Drive API error (${res.status}): ${text}`);
     }
+    logLine(`driveFetch: success status=${res.status} path=${path}`);
     return res;
   }
 
@@ -4579,14 +4621,20 @@ Please:
   }
 
   async function bootstrapAfterGoogleAuth() {
+    logLine("bootstrapAfterGoogleAuth: begin");
     const authed = await ensureGoogleAuthorized();
-    if (!authed) return;
+    if (!authed) {
+      logLine("bootstrapAfterGoogleAuth: aborted (not authorized)");
+      return;
+    }
     try {
       await syncProjectsFromDrive();
       await promptForDriveProjectSelection();
+      logLine("bootstrapAfterGoogleAuth: end");
     } catch (e) {
       logLine("Failed to initialize Drive workspace: " + e.message, true);
       setAuthStatus("Drive setup failed: " + e.message);
+      logLine("bootstrapAfterGoogleAuth: failed");
     }
   }
 
@@ -4839,20 +4887,45 @@ Please:
     }
 
     $googleBtn.on("click", async function () {
+      logLine("Google sign-in button clicked.");
       const $btn = $(this);
       const previousLabel = $btn.text();
       if (!googleDriveReady) {
+        logLine("Google sign-in blocked: SDK not ready.", true);
         setAuthStatus("Google SDK is still loading. Please try again in a moment.");
         return;
       }
       $btn.prop("disabled", true).text("Signing in...");
       try {
         await bootstrapAfterGoogleAuth();
+        logLine("Google sign-in flow completed.");
       } catch (e) {
         logLine("Google sign-in failed: " + e.message, true);
         setAuthStatus("Google sign-in failed: " + e.message);
       } finally {
         $btn.prop("disabled", false).text(previousLabel);
+        logLine("Google sign-in button handler finished.");
+      }
+    });
+
+    $("#google-reload-btn").on("click", async function () {
+      const $reloadBtn = $(this);
+      const $authBtn = $("#google-auth-btn");
+      logLine("Google SDK reload requested.");
+      $reloadBtn.prop("disabled", true).text("Reloading SDK...");
+      $authBtn.prop("disabled", true).text("Loading Google SDK...");
+      try {
+        resetGoogleSdkState();
+        setAuthStatus("Reloading Google SDK...");
+        await prepareGoogleSdk();
+        $authBtn.prop("disabled", false).text("Sign in with Google Drive");
+        logLine("Google SDK reload completed.");
+      } catch (e) {
+        logLine("Google SDK reload failed: " + e.message, true);
+        setAuthStatus("Google SDK reload failed: " + e.message);
+        $authBtn.prop("disabled", true).text("Sign-in unavailable");
+      } finally {
+        $reloadBtn.prop("disabled", false).text("Force reload SDK");
       }
     });
 
