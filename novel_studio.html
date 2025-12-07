@@ -556,7 +556,7 @@
       border-top: 1px solid #1f2833;
       box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.4);
       font-size: 12px;
-      z-index: 10;
+      z-index: 70;
     }
     #console-panel-header {
       display: flex;
@@ -916,14 +916,17 @@
   </style>
 </head>
 <body>
-<div id="auth-overlay">
-  <div id="auth-card">
-    <h2>Connect Google Drive</h2>
-    <p>
-      Novel Studio now uses your Google Drive as the source of truth for all images and documents.
-      Sign in to grant Drive access before working with any projects.
-    </p>
-    <button id="google-auth-btn">Sign in with Google Drive</button>
+  <div id="auth-overlay">
+    <div id="auth-card">
+      <h2>Connect Google Drive</h2>
+      <p>
+        Novel Studio now uses your Google Drive as the source of truth for all images and documents.
+        Sign in to grant Drive access before working with any projects.
+      </p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <button id="google-auth-btn">Sign in with Google Drive</button>
+      <button id="google-reload-btn" class="small" style="background:#1f2833;color:#e5e5e5;">Force reload SDK</button>
+    </div>
     <div id="auth-status-text">Waiting for sign-in...</div>
   </div>
 </div>
@@ -1200,7 +1203,7 @@
 
 <div id="console-panel" class="collapsed">
   <div id="console-panel-header">
-    <span id="console-panel-title">Console (collapsed)</span>
+<span id="console-panel-title">Console (collapsed)</span>
     <button id="console-toggle-btn">Expand</button>
   </div>
   <div id="console-panel-body">
@@ -1243,7 +1246,19 @@
   let googleAuthorized = false;
   let googleDriveReady = false;
   let googleInitPromise = null;
-  let googleUserEmail = null;
+let googleUserEmail = null;
+
+  function resetGoogleSdkState() {
+    googleDriveReady = false;
+    googleInitPromise = null;
+    googleSdkLoadPromise = null;
+    googleTokenClient = null;
+    ["google-gsi-script", "google-gapi-script"].forEach((id) => {
+      const existing = document.getElementById(id);
+      if (existing) existing.remove();
+    });
+    logLine("Google SDK state cleared. Reloading scripts is now allowed.");
+  }
   let projects = {}; // { projectName: {name, assistants, vectorStores, outlines, chapters} }
   let currentProjectName = null;
   let assistantModel = ASSISTANT_MODELS[0];
@@ -1260,6 +1275,8 @@
   let projectPickerSelection = null;
 
   const isFileOrigin = window.location.protocol === "file:";
+  const isLocalhostOrigin = ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
+  let loggedLocalhostHint = false;
 
   function fileToDataUrl(file) {
     return new Promise((resolve, reject) => {
@@ -1349,6 +1366,17 @@
       throw new Error(
         "Google OAuth blocks the file:// origin. Serve novel_studio.html from http(s) (e.g., `python3 -m http.server`) to sign in."
       );
+    }
+    if (window.location.protocol === "http:" && !isLocalhostOrigin) {
+      throw new Error(
+        "Google OAuth requires HTTPS for non-local origins. Use https://, a tunnel (ngrok/localhost.run), or http://localhost with the origin whitelisted in your OAuth client."
+      );
+    }
+    if (isLocalhostOrigin && !loggedLocalhostHint) {
+      logLine(
+        `Running on ${window.location.origin}. Ensure this origin is added as an Authorized JavaScript origin on your Google OAuth client to allow localhost sign-in.`
+      );
+      loggedLocalhostHint = true;
     }
     if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.includes("YOUR_")) {
       throw new Error("Set GOOGLE_CLIENT_ID to a valid OAuth client id for Google Drive.");
