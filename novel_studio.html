@@ -4965,13 +4965,17 @@ Please:
       logLine("Google sign-in button clicked.");
       const $btn = $(this);
       const previousLabel = $btn.text();
-      if (!googleDriveReady) {
-        logLine("Google sign-in blocked: SDK not ready.", true);
-        setAuthStatus("Google SDK is still loading. Please try again in a moment.");
-        return;
-      }
       $btn.prop("disabled", true).text("Signing in...");
       try {
+        if (!googleDriveReady) {
+          logLine("Google sign-in: SDK not ready, attempting to prepare now.");
+          setAuthStatus("Loading Google SDK...");
+          await prepareGoogleSdk();
+          if (!googleDriveReady) {
+            throw new Error("Google SDK is still not ready. Check your client ID and try again.");
+          }
+          logLine("Google sign-in: SDK prepared on-demand.");
+        }
         await bootstrapAfterGoogleAuth();
         logLine("Google sign-in flow completed.");
       } catch (e) {
