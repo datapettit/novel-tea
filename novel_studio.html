@@ -597,6 +597,9 @@
     #console-panel.collapsed #console-copy-debug-btn {
       display: none;
     }
+    #console-panel.collapsed #console-copy-window-btn {
+      display: none;
+    }
     #console-log .line {
       margin: 2px 0;
     }
@@ -1227,6 +1230,7 @@
       <div id="console-panel-header">
 <span id="console-panel-title">Console (collapsed)</span>
       <div id="console-panel-actions">
+        <button id="console-copy-window-btn" class="small">Copy console</button>
         <button id="console-copy-btn" class="small">Copy log</button>
         <button id="console-copy-debug-btn" class="small">Copy debug</button>
         <button id="console-toggle-btn">Expand</button>
@@ -1456,7 +1460,7 @@
         () => !!window.google?.accounts?.oauth2
       );
       logLine("waitForGoogleSdk: loading Google API client script...");
-      await loadGoogleScript("google-gapi-script", "https://apis.google.com/js/api.js", () => !!window.gapi?.client);
+      await loadGoogleScript("google-gapi-script", "https://apis.google.com/js/api.js", () => !!window.gapi);
       logLine("waitForGoogleSdk: all Google scripts reported loaded.");
     })().catch((err) => {
       logLine("waitForGoogleSdk: failed to load Google SDK: " + err.message, true);
@@ -2167,6 +2171,7 @@
     $("#console-toggle-btn").text(expanded ? "Collapse" : "Expand");
     $("#console-copy-btn").prop("disabled", !expanded);
     $("#console-copy-debug-btn").prop("disabled", !expanded);
+    $("#console-copy-window-btn").prop("disabled", !expanded);
   }
 
   function saveProjectsToStorage() {
@@ -5162,6 +5167,11 @@ Please:
     });
 
     $("#console-copy-btn").on("click", async function (e) {
+      e.stopPropagation();
+      await copyConsoleLog();
+    });
+
+    $("#console-copy-window-btn").on("click", async function (e) {
       e.stopPropagation();
       await copyConsoleLog();
     });
