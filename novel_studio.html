@@ -594,6 +594,9 @@
     #console-panel.collapsed #console-copy-btn {
       display: none;
     }
+    #console-panel.collapsed #console-copy-debug-btn {
+      display: none;
+    }
     #console-log .line {
       margin: 2px 0;
     }
@@ -1221,10 +1224,11 @@
 </div>
 
   <div id="console-panel" class="collapsed">
-    <div id="console-panel-header">
+      <div id="console-panel-header">
 <span id="console-panel-title">Console (collapsed)</span>
       <div id="console-panel-actions">
         <button id="console-copy-btn" class="small">Copy log</button>
+        <button id="console-copy-debug-btn" class="small">Copy debug</button>
         <button id="console-toggle-btn">Expand</button>
       </div>
     </div>
@@ -1472,6 +1476,10 @@
       let script = document.getElementById(id);
       const descriptor = src.includes("gsi") ? "Google Identity Services" : "Google API client";
 
+      if (script) {
+        logLine(`${descriptor} script tag already present. ${describeScriptState(id, descriptor)}`);
+      }
+
       if (!script) {
         script = document.createElement("script");
         script.id = id;
@@ -1479,14 +1487,26 @@
         script.async = true;
         script.defer = true;
         document.head.appendChild(script);
+      } else if (script.src !== src) {
+        logLine(`${descriptor} script src mismatch; expected ${src} but found ${script.src}`, true);
       }
 
+      script.dataset.status = "loading";
+
       const timeout = setTimeout(() => {
+        const online = navigator.onLine;
+        const readyState = script?.readyState || "unknown";
+        const details = describeScriptState(id, descriptor);
+        logLine(
+          `${descriptor} script timed out while loading. online=${online} readyState=${readyState}. ${details}`,
+          true
+        );
         reject(new Error(`${descriptor} script timed out while loading.`));
       }, 15000);
 
       const onLoad = () => {
         clearTimeout(timeout);
+        script.dataset.status = "loaded";
         if (checkLoaded()) {
           logLine(`${descriptor} script loaded.`);
           resolve();
@@ -1497,6 +1517,7 @@
 
       const onError = () => {
         clearTimeout(timeout);
+        script.dataset.status = "errored";
         reject(new Error(`${descriptor} script failed to load (network blocked or offline).`));
       };
 
@@ -1741,18 +1762,23 @@
 
   function logLine(message, isError = false) {
     const prefix = isError ? "[ERR]" : "[LOG]";
+    const timestamp = new Date().toISOString();
     const $content = $("<span>");
-    $content.append($("<span>").addClass("prefix").text(prefix + " "));
+    $content.append($("<span>").addClass("prefix").text(`${prefix} ${timestamp} `));
     $content.append(document.createTextNode(message));
     appendToConsole($content, isError);
   }
 
-  async function copyConsoleLog() {
-    const text = $("#console-log .line")
+  function collectConsoleText() {
+    return $("#console-log .line")
       .map((_, el) => $(el).text())
       .get()
       .join("\n")
       .trim();
+  }
+
+  async function copyConsoleLog() {
+    const text = collectConsoleText();
 
     if (!text) {
       logLine("Console is empty; nothing to copy.");
@@ -1769,6 +1795,50 @@
       logLine("Console log copied to clipboard.");
     } catch (err) {
       logLine("Failed to copy console log: " + err.message, true);
+    }
+  }
+
+  function describeScriptState(id, descriptor) {
+    const script = document.getElementById(id);
+    if (!script) return `${descriptor} script tag: missing`;
+    const readyState = script.readyState || "unknown";
+    const status = script.dataset?.status || "unset";
+    return `${descriptor} script tag: present src=${script.src || "(empty)"} readyState=${readyState} data-status=${status}`;
+  }
+
+  async function copyDebugInfo() {
+    const lines = [];
+    lines.push("=== Novel Studio Debug Snapshot ===");
+    lines.push(`Timestamp: ${new Date().toISOString()}`);
+    lines.push(`Location: ${window.location.href}`);
+    lines.push(`Origin: ${window.location.origin}`);
+    lines.push(`User agent: ${navigator.userAgent}`);
+    lines.push(`Online: ${navigator.onLine}`);
+    lines.push(`Google Client ID present: ${!!googleClientId}`);
+    lines.push(`API key configured: ${!!apiKey}`);
+    lines.push(`Google SDK load promise active: ${!!googleSdkLoadPromise}`);
+    lines.push(`GIS loaded: ${!!window.google?.accounts?.oauth2}`);
+    lines.push(`gapi client loaded: ${!!window.gapi?.client}`);
+    lines.push("Script status:");
+    lines.push(`  ${describeScriptState("google-gsi-script", "Google Identity Services")}`);
+    lines.push(`  ${describeScriptState("google-gapi-script", "Google API client")}`);
+
+    const consoleText = collectConsoleText();
+    lines.push("--- Console Log ---");
+    lines.push(consoleText || "(empty)");
+
+    const payload = lines.join("\n");
+
+    if (!navigator.clipboard) {
+      logLine("Clipboard access is not available in this browser.", true);
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(payload);
+      logLine("Debug snapshot copied to clipboard.");
+    } catch (err) {
+      logLine("Failed to copy debug snapshot: " + err.message, true);
     }
   }
 
@@ -2096,6 +2166,7 @@
     $("#console-panel-title").text(expanded ? "Console (expanded)" : "Console (collapsed)");
     $("#console-toggle-btn").text(expanded ? "Collapse" : "Expand");
     $("#console-copy-btn").prop("disabled", !expanded);
+    $("#console-copy-debug-btn").prop("disabled", !expanded);
   }
 
   function saveProjectsToStorage() {
@@ -5093,6 +5164,11 @@ Please:
     $("#console-copy-btn").on("click", async function (e) {
       e.stopPropagation();
       await copyConsoleLog();
+    });
+
+    $("#console-copy-debug-btn").on("click", async function (e) {
+      e.stopPropagation();
+      await copyDebugInfo();
     });
 
     $("#console-toggle-btn").on("click", function (e) {
