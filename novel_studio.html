@@ -942,14 +942,13 @@
       <button id="google-reload-btn" class="small" style="background:#1f2833;color:#e5e5e5;">Force reload SDK</button>
     </div>
     <div style="margin-top:8px;">
-      <div style="font-size:12px;color:#c5c6c7;">Google OAuth Client ID</div>
+      <div style="font-size:12px;color:#c5c6c7;">Google OAuth Client ID (hardcoded for now)</div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
-        <input type="text" id="google-client-id-input" placeholder="Paste your OAuth client ID" style="flex:1;min-width:260px;" />
-        <button id="google-client-id-save-btn" class="small">Save client ID</button>
+        <input type="text" id="google-client-id-input" style="flex:1;min-width:260px;" readonly disabled />
       </div>
       <div id="google-client-id-status" style="font-size:11px;color:#c5c6c7;margin-top:4px;"></div>
       <div style="font-size:11px;color:#c5c6c7;margin-top:6px;line-height:1.5;">
-        This app signs <em>you</em> in with your own Google account, using a Google OAuth Web client ID that the host provides. If you're just using the app, you shouldn't have to generate anything—sign in normally. <strong>If you're self-hosting and this field is empty,</strong> create a Web OAuth client ID in <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" style="color:#66fcf1;">Google Cloud Console</a>, add this page's origin as an Authorized JavaScript origin, and paste the resulting Client ID here.
+        This app signs <em>you</em> in with your own Google account. The OAuth Web client ID is currently baked into the app for convenience. <strong>TODO:</strong> externalize this and avoid hardcoding sensitive configuration.
       </div>
     </div>
     <div id="auth-status-text">Waiting for sign-in...</div>
@@ -1252,11 +1251,8 @@
   const PROJECTS_KEY = "novelStudioProjects"; // localStorage key
   const MODEL_KEY = "novelStudioAssistantModel";
   const ASSISTANT_MODELS = ["gpt-4.1", "gpt-4o", "gpt-4o-mini"];
-  const GOOGLE_CLIENT_ID_STORAGE_KEY = "novelStudioGoogleClientId";
-  let googleClientId =
-    new URLSearchParams(window.location.search).get("googleClientId") ||
-    localStorage.getItem(GOOGLE_CLIENT_ID_STORAGE_KEY) ||
-    "YOUR_GOOGLE_CLIENT_ID";
+  const HARDCODED_GOOGLE_CLIENT_ID = "310598630732-eim15b73qojoto7o9ubn61uit44gb3je.apps.googleusercontent.com";
+  let googleClientId = HARDCODED_GOOGLE_CLIENT_ID;
   const GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/drive.file",
@@ -1298,27 +1294,17 @@
   function updateGoogleClientIdStatus() {
     const $status = $("#google-client-id-status");
     if (!$status.length) return;
-    if (!googleClientId || googleClientId.includes("YOUR_")) {
-      $status.text(
-        "Client ID missing. The host must supply a Google OAuth Web client ID; sign-in still uses your own Google account."
-      );
-    } else {
-      const tail = googleClientId.slice(-8);
-      $status.text(`Using client ID ending with ...${tail}. Stored locally.`);
-    }
+    const tail = googleClientId.slice(-8);
+    $status.text(`Using hardcoded client ID ending with ...${tail}. TODO: externalize this (bad practice).`);
   }
 
-  function setGoogleClientId(value) {
-    const trimmed = (value || "").trim();
-    googleClientId = trimmed || "YOUR_GOOGLE_CLIENT_ID";
-    if (trimmed) {
-      localStorage.setItem(GOOGLE_CLIENT_ID_STORAGE_KEY, trimmed);
-    } else {
-      localStorage.removeItem(GOOGLE_CLIENT_ID_STORAGE_KEY);
-    }
-    $("#google-client-id-input").val(trimmed);
+  function setGoogleClientId() {
+    logLine(
+      "Google OAuth client ID is hardcoded for now (TODO: externalize). Ignoring attempts to change it.",
+      true
+    );
+    $("#google-client-id-input").val(googleClientId);
     updateGoogleClientIdStatus();
-    logLine("Google OAuth client ID updated.");
   }
   let projects = {}; // { projectName: {name, assistants, vectorStores, outlines, chapters} }
   let currentProjectName = null;
@@ -1440,12 +1426,10 @@
       );
       loggedLocalhostHint = true;
     }
-    if (!googleClientId || googleClientId.includes("YOUR_")) {
-      logLine("ensureDriveConfigPresent: GOOGLE_CLIENT_ID missing or placeholder.", true);
-      throw new Error(
-        "Google Drive sign-in needs GOOGLE_CLIENT_ID set by the app host (a Web OAuth client ID). You will sign in with your own Google account; if you're not hosting, ask the host to configure this."
-      );
-    }
+    logLine(
+      "ensureDriveConfigPresent: using hardcoded Google OAuth client ID (TODO: externalize; this is bad practice).",
+      true
+    );
     logLine("ensureDriveConfigPresent: end");
   }
 
@@ -1736,8 +1720,17 @@
       recordImageCache(fileId, dataUrl, blob, contentType);
       return { type: "image", data: dataUrl, contentType, blob };
     }
-    const text = await blob.text();
-    return { type: "text", data: text, contentType, blob };
+    const isTextLike =
+      contentType.startsWith("text/") ||
+      contentType.includes("json") ||
+      contentType.includes("yaml") ||
+      contentType.includes("xml") ||
+      contentType.includes("csv");
+    if (isTextLike) {
+      const text = await blob.text();
+      return { type: "text", data: text, contentType, blob };
+    }
+    return { type: "binary", data: null, contentType, blob };
   }
 
   async function warmImageCacheForDocs(docs = []) {
@@ -4971,11 +4964,15 @@ Please:
       showImageModal(content.data, doc.filename);
       return;
     }
+    if (content.type === "text") {
+      return;
+    }
 
-    const blob = content.blob || new Blob([content.data || ""], { type: content.contentType || "application/octet-stream" });
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    if (content.blob) {
+      const url = URL.createObjectURL(content.blob);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    }
   }
 
   async function previewDocument(project, doc, existingContent = null) {
@@ -4995,11 +4992,12 @@ Please:
     if (blob) {
       const url = URL.createObjectURL(blob);
       const $link = $("<a>").addClass("download-link").attr("href", url).attr("download", doc.filename).text("Download file");
-      $preview.append($("<div>").text("Preview unavailable. Download instead:"));
+      $preview.append($("<div>").text("Preview unavailable for this file type. Download instead:"));
       $preview.append($link);
-    } else {
-      $preview.text("Preview unavailable for this file type.");
+      return;
     }
+
+    $preview.text("Preview unavailable for this file type.");
   }
 
   // ==============================
@@ -5023,9 +5021,9 @@ Please:
     setCharacterMode(characterConversationMode);
     collapseAllMenuPanels();
 
-    const initialClientId = googleClientId && !googleClientId.includes("YOUR_") ? googleClientId : "";
-    $("#google-client-id-input").val(initialClientId);
+    $("#google-client-id-input").val(googleClientId);
     updateGoogleClientIdStatus();
+    logLine("Google OAuth client ID is hardcoded for now (TODO: externalize). This is not best practice.", true);
 
     const $googleBtn = $("#google-auth-btn");
     try {
@@ -5067,33 +5065,6 @@ Please:
       } finally {
         $btn.prop("disabled", false).text(previousLabel);
         logLine("Google sign-in button handler finished.");
-      }
-    });
-
-    $("#google-client-id-save-btn").on("click", async function () {
-      const $reloadBtn = $("#google-reload-btn");
-      const $authBtn = $("#google-auth-btn");
-      setGoogleClientId($("#google-client-id-input").val());
-      if (!googleClientId || googleClientId.includes("YOUR_")) {
-        setAuthStatus("Set a valid Google OAuth client ID to enable Drive sign-in.");
-        $authBtn.prop("disabled", true).text("Sign-in unavailable");
-        return;
-      }
-      logLine("Google SDK reload requested after client ID change.");
-      $reloadBtn.prop("disabled", true).text("Reloading SDK...");
-      $authBtn.prop("disabled", true).text("Loading Google SDK...");
-      try {
-        resetGoogleSdkState();
-        setAuthStatus("Reloading Google SDK with updated client ID...");
-        await prepareGoogleSdk();
-        $authBtn.prop("disabled", false).text("Sign in with Google Drive");
-        logLine("Google SDK reload completed after client ID change.");
-      } catch (e) {
-        logLine("Reload after client ID change failed: " + e.message, true);
-        setAuthStatus("Google SDK reload failed: " + e.message);
-        $authBtn.prop("disabled", true).text("Sign-in unavailable");
-      } finally {
-        $reloadBtn.prop("disabled", false).text("Force reload SDK");
       }
     });
 
