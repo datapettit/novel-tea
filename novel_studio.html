@@ -1127,6 +1127,29 @@
           <button id="tts-chapter-btn">Generate TTS for a Chapter</button>
         </div>
         <div class="menu-subgroup">
+          <div class="menu-subtitle">Narrator Voice</div>
+          <div class="menu-inline-controls">
+            <label for="narrator-gender-select">Gender</label>
+            <select id="narrator-gender-select" style="min-width:110px;">
+              <option value="unknown">Unknown / undefined</option>
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+            </select>
+          </div>
+          <div class="menu-inline-controls">
+            <label for="narrator-voice-select">Voice</label>
+            <select id="narrator-voice-select" style="min-width:140px;"></select>
+            <label for="narrator-tts-model-select">Model</label>
+            <select id="narrator-tts-model-select" style="min-width:110px;"></select>
+          </div>
+          <div class="menu-inline-controls">
+            <label for="narrator-voice-speed">Speed</label>
+            <input type="number" id="narrator-voice-speed" min="0.25" max="4" step="0.05" style="width:90px;" value="1" />
+            <button id="refresh-voice-list-btn" class="small">Refresh Voices</button>
+            <button id="save-narrator-settings-btn" class="small">Save Narrator Voice</button>
+          </div>
+        </div>
+        <div class="menu-subgroup">
           <div class="menu-subtitle">Sora / Video</div>
           <button id="sora-stub-btn" style="margin-top:0;">(Stub) Sora / Video Generation</button>
         </div>
@@ -1198,6 +1221,21 @@
           <button id="upload-character-docx-btn">Upload Word Doc</button>
           <input type="file" id="canvas-upload-input" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
         </div>
+        <div id="canvas-voice-row" class="menu-inline-controls" style="flex-wrap:wrap;gap:8px;">
+          <label for="character-gender-select">Gender:</label>
+          <select id="character-gender-select" style="min-width:120px;">
+            <option value="unknown">Unknown / undefined</option>
+            <option value="female">Female</option>
+            <option value="male">Male</option>
+          </select>
+          <label for="character-voice-select">Voice:</label>
+          <select id="character-voice-select" style="min-width:140px;"></select>
+          <label for="character-tts-model-select">Model:</label>
+          <select id="character-tts-model-select" style="min-width:110px;"></select>
+          <label for="character-voice-speed">Speed:</label>
+          <input type="number" id="character-voice-speed" min="0.25" max="4" step="0.05" style="width:90px;" value="1" />
+          <button id="save-character-settings-btn" class="small">Save Character Voice</button>
+        </div>
       </div>
       <div
         id="canvas-document"
@@ -1267,8 +1305,20 @@
     "history",
     "outlines",
     "drafts",
+    "audio",
   ];
   const CHARACTER_CATEGORY = "characters";
+  const DEFAULT_TTS_MODEL = "tts-1";
+  const TTS_MODELS = ["tts-1", "tts-1-hd"];
+  const FALLBACK_VOICES = ["alloy", "ash", "coral", "echo", "shimmer", "verse"];
+  let openAIVoices = [...FALLBACK_VOICES];
+  let voicesLoaded = false;
+  const FFMPEG_SCRIPT_URL = "https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js";
+  const FFMPEG_CORE_URL = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/ffmpeg-core.js";
+  let ffmpegContext = null;
+  let ffmpegLoadPromise = null;
+  let docAudioUrl = null;
+  let docAudioElement = null;
   let googleTokenClient = null;
   let googleAccessToken = null;
   let googleAuthorized = false;
@@ -1514,6 +1564,55 @@
     });
   }
 
+  function loadExternalScript(id, src, descriptor = "external", checkLoaded = () => false) {
+    return new Promise((resolve, reject) => {
+      if (checkLoaded()) {
+        resolve();
+        return;
+      }
+
+      let script = document.getElementById(id);
+      if (script) {
+        logLine(`${descriptor} script tag already exists. id=${id} src=${script.src || "(inline)"}`);
+      }
+      if (!script) {
+        script = document.createElement("script");
+        script.id = id;
+        script.src = src;
+        script.async = true;
+        script.defer = true;
+        logLine(`Loading ${descriptor} script from ${src}`);
+        document.head.appendChild(script);
+      } else if (script.src !== src) {
+        logLine(`${descriptor} script src mismatch; expected ${src} but found ${script.src}`, true);
+      }
+
+      const timeout = setTimeout(() => {
+        const readyState = script?.readyState || "unknown";
+        logLine(`${descriptor} script timed out. readyState=${readyState} src=${src}`, true);
+        reject(new Error(`${descriptor} script timed out while loading.`));
+      }, 15000);
+
+      const onLoad = () => {
+        clearTimeout(timeout);
+        if (checkLoaded()) {
+          logLine(`${descriptor} script loaded.`);
+          resolve();
+        } else {
+          reject(new Error(`${descriptor} script loaded but global is missing.`));
+        }
+      };
+
+      const onError = () => {
+        clearTimeout(timeout);
+        reject(new Error(`${descriptor} script failed to load.`));
+      };
+
+      script.addEventListener("load", onLoad, { once: true });
+      script.addEventListener("error", onError, { once: true });
+    });
+  }
+
   async function prepareGoogleSdk() {
     logLine("prepareGoogleSdk: begin");
     if (googleDriveReady) return;
@@ -1719,6 +1818,9 @@
       const dataUrl = await blobToDataUrl(blob);
       recordImageCache(fileId, dataUrl, blob, contentType);
       return { type: "image", data: dataUrl, contentType, blob };
+    }
+    if (contentType.startsWith("audio/")) {
+      return { type: "audio", data: null, contentType, blob };
     }
     const isTextLike =
       contentType.startsWith("text/") ||
@@ -2210,6 +2312,16 @@
     if (!project.chapters) project.chapters = {};
     if (!project.storyArc) project.storyArc = null;
     if (!project.characters) project.characters = {};
+    if (!project.audio) project.audio = { paragraphs: {}, merged: {} };
+    project.audio.paragraphs = project.audio.paragraphs || {};
+    project.audio.merged = project.audio.merged || {};
+    project.narratorSettings = {
+      voice: project.narratorSettings?.voice || "",
+      gender: project.narratorSettings?.gender || "unknown",
+      ttsModel: project.narratorSettings?.ttsModel || DEFAULT_TTS_MODEL,
+      speed: project.narratorSettings?.speed || 1,
+      preferences: project.narratorSettings?.preferences || {},
+    };
     if (!project.drive) project.drive = { rootId: null, categoryFolders: {}, characterFolders: {}, characterDraftFolders: {} };
     project.drive.categoryFolders = project.drive.categoryFolders || {};
     project.drive.characterFolders = project.drive.characterFolders || {};
@@ -2231,6 +2343,16 @@
       };
     }
     return project.characters[cleanName];
+  }
+
+  function getNarratorSettings(project) {
+    return normalizeVoiceSettings(project.narratorSettings || {});
+  }
+
+  function saveNarratorSettings(project, settings) {
+    project.narratorSettings = normalizeVoiceSettings(settings);
+    saveProjectsToStorage();
+    logLine("Narrator voice settings saved.");
   }
 
   function highlightSelectedCharacterCard() {
@@ -2261,6 +2383,44 @@
     $("#current-character-name").text(currentCharacterName || "None");
   }
 
+  async function refreshVoiceSelectors(project) {
+    const safeProject = ensureProjectStructure(project || { name: "" });
+    const voices = await fetchOpenAIVoices();
+    const narratorSettings = getNarratorSettings(safeProject);
+    populateVoiceSelect($("#narrator-voice-select"), voices, narratorSettings.voice || defaultVoice());
+    populateTtsModelSelect($("#narrator-tts-model-select"), narratorSettings.ttsModel);
+    $("#narrator-gender-select").val(narratorSettings.gender || "unknown");
+    $("#narrator-voice-speed").val(narratorSettings.speed || 1);
+
+    const charSettings = getCharacterVoiceSettings(safeProject, currentCharacterName);
+    populateVoiceSelect($("#character-voice-select"), voices, charSettings.voice || defaultVoice());
+    populateTtsModelSelect($("#character-tts-model-select"), charSettings.ttsModel);
+    $("#character-gender-select").val(charSettings.gender || "unknown");
+    $("#character-voice-speed").val(charSettings.speed || 1);
+    const disabled = !currentCharacterName;
+    $("#canvas-voice-row select, #canvas-voice-row input, #save-character-settings-btn").prop("disabled", disabled);
+  }
+
+  function readNarratorVoiceForm(project) {
+    return normalizeVoiceSettings({
+      ...getNarratorSettings(project),
+      voice: $("#narrator-voice-select").val() || defaultVoice(),
+      ttsModel: $("#narrator-tts-model-select").val() || DEFAULT_TTS_MODEL,
+      gender: $("#narrator-gender-select").val() || "unknown",
+      speed: parseFloat($("#narrator-voice-speed").val()) || 1,
+    });
+  }
+
+  function readCharacterVoiceForm(project) {
+    return normalizeVoiceSettings({
+      ...getCharacterVoiceSettings(project, currentCharacterName),
+      voice: $("#character-voice-select").val() || defaultVoice(),
+      ttsModel: $("#character-tts-model-select").val() || DEFAULT_TTS_MODEL,
+      gender: $("#character-gender-select").val() || "unknown",
+      speed: parseFloat($("#character-voice-speed").val()) || 1,
+    });
+  }
+
   function setCurrentCharacter(project, name) {
     const cleanName = (name || "").trim();
     if (!cleanName) {
@@ -2276,6 +2436,7 @@
     refreshCharacterSelectUI(project);
     highlightSelectedCharacterCard();
     logLine("Working on character: " + cleanName);
+    refreshVoiceSelectors(project).catch(() => {});
   }
 
   async function selectProject(name) {
@@ -2302,6 +2463,7 @@
       logLine("Drive setup failed: " + e.message, true);
     }
     refreshCharacterSelectUI(project);
+    refreshVoiceSelectors(project).catch(() => {});
     refreshCharacterRoster(project, true).catch((e) => {
       logLine("Could not refresh character roster: " + e.message, true);
     });
@@ -2453,6 +2615,93 @@
     }
     // Expect binary audio
     return await res.blob();
+  }
+
+  async function fetchOpenAIVoices(force = false) {
+    if (voicesLoaded && !force) return openAIVoices;
+    logLine(`Fetching OpenAI voices (force=${force})...`);
+    try {
+      const res = await openaiJson("/audio/voices", "GET", null, false, "Fetch OpenAI voices");
+      if (res?.voices && Array.isArray(res.voices) && res.voices.length) {
+        openAIVoices = res.voices
+          .map((v) => (typeof v === "string" ? v : v.id || v.name))
+          .filter(Boolean);
+        voicesLoaded = true;
+        logLine(`Loaded ${openAIVoices.length} voices from OpenAI: ${openAIVoices.join(", ")}`);
+        return openAIVoices;
+      }
+      logLine("OpenAI voice list returned no voices; using fallback list.", true);
+    } catch (e) {
+      logLine(`Unable to load voices from OpenAI, using fallback list: ${e.message}`, true);
+    }
+    openAIVoices = [...FALLBACK_VOICES];
+    logLine(`Using fallback voices (${openAIVoices.length}): ${openAIVoices.join(", ")}`);
+    return openAIVoices;
+  }
+
+  function defaultVoice() {
+    return openAIVoices?.[0] || FALLBACK_VOICES[0];
+  }
+
+  function normalizeVoiceSettings(input = {}) {
+    return {
+      voice: input.voice || "",
+      ttsModel: input.ttsModel || DEFAULT_TTS_MODEL,
+      gender: input.gender || "unknown",
+      speed: input.speed || 1,
+      preferences: input.preferences || {},
+    };
+  }
+
+  function clampNumber(value, min, max, fallback = null) {
+    const num = Number(value);
+    if (Number.isNaN(num)) return fallback;
+    return Math.min(Math.max(num, min), max);
+  }
+
+  async function ensureFfmpegReady() {
+    if (ffmpegContext) return ffmpegContext;
+    if (ffmpegLoadPromise) return ffmpegLoadPromise;
+
+    ffmpegLoadPromise = (async () => {
+      logLine("Loading FFmpeg.wasm for audio merging...");
+      await loadExternalScript("ffmpeg-script", FFMPEG_SCRIPT_URL, "FFmpeg", () => !!window.FFmpeg);
+      if (!window.FFmpeg) throw new Error("FFmpeg global missing after script load.");
+      const { createFFmpeg, fetchFile } = window.FFmpeg;
+      const ffmpeg = createFFmpeg({ log: true, corePath: FFMPEG_CORE_URL });
+      await ffmpeg.load();
+      ffmpegContext = { ffmpeg, fetchFile };
+      logLine("FFmpeg.wasm loaded and ready for merges.");
+      return ffmpegContext;
+    })().catch((err) => {
+      ffmpegLoadPromise = null;
+      logLine(`FFmpeg load failed: ${err.message}`, true);
+      throw err;
+    });
+
+    return ffmpegLoadPromise;
+  }
+
+  function populateVoiceSelect($select, voiceList, selected = "") {
+    const voices = (voiceList && voiceList.length ? voiceList : FALLBACK_VOICES).slice();
+    if (!voices.length) voices.push(defaultVoice());
+    $select.empty();
+    voices.forEach((v) => {
+      $select.append($("<option>").attr("value", v).text(v));
+    });
+    if (selected && voices.includes(selected)) {
+      $select.val(selected);
+    } else {
+      $select.val(voices[0]);
+    }
+  }
+
+  function populateTtsModelSelect($select, selected = DEFAULT_TTS_MODEL) {
+    $select.empty();
+    TTS_MODELS.forEach((m) => {
+      $select.append($("<option>").attr("value", m).text(m));
+    });
+    $select.val(TTS_MODELS.includes(selected) ? selected : DEFAULT_TTS_MODEL);
   }
 
   function blobToDataUrl(blob) {
@@ -3333,11 +3582,7 @@ When asked about photos:
       return record.settings;
     }
 
-    const settingsObj = {
-      voice_model: "",
-      preferences: {},
-      updated_at: new Date().toISOString(),
-    };
+    const settingsObj = normalizeVoiceSettings({ updated_at: new Date().toISOString() });
     const blob = new Blob([JSON.stringify(settingsObj, null, 2)], { type: "application/json" });
     const file = new File([blob], `${name} Settings.json`, { type: "application/json" });
     const parentId = await ensureCharacterFolder(project, name);
@@ -3352,6 +3597,53 @@ When asked about photos:
     };
     saveProjectsToStorage();
     logLine(`Created settings file for ${name} (Drive ID: ${driveEntry.id}).`);
+    return record.settings;
+  }
+
+  function getCharacterVoiceSettings(project, name) {
+    const record = ensureCharacterRecord(project, name);
+    if (!record) return normalizeVoiceSettings();
+    return normalizeVoiceSettings(record.settings?.json || record.settings || {});
+  }
+
+  function resolveVoiceProfile(project, characterName = null) {
+    const profile = characterName
+      ? getCharacterVoiceSettings(project, characterName)
+      : getNarratorSettings(project);
+    const cleaned = normalizeVoiceSettings(profile);
+    const speed = clampNumber(cleaned.speed, 0.25, 4, 1) || 1;
+    const resolved = {
+      ...cleaned,
+      speed,
+      characterName: characterName || null,
+      source: characterName ? "character" : "narrator",
+    };
+    logLine(
+      `Voice profile resolved (${resolved.source}): ` +
+        JSON.stringify({ voice: resolved.voice || defaultVoice(), model: resolved.ttsModel, speed: resolved.speed, gender: resolved.gender })
+    );
+    return resolved;
+  }
+
+  async function saveCharacterVoiceSettings(project, name, settings) {
+    const record = ensureCharacterRecord(project, name);
+    if (!record) return null;
+    const normalized = { ...normalizeVoiceSettings(settings), updated_at: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(normalized, null, 2)], { type: "application/json" });
+    const file = new File([blob], `${name} Settings.json`, { type: "application/json" });
+    const parentId = await ensureCharacterFolder(project, name);
+    const driveEntry = await storeFileWithDriveAndVector(project, CHARACTER_CATEGORY, file.name, file, {
+      parentId,
+      driveId: record.settings?.driveId || null,
+    });
+
+    record.settings = {
+      driveId: driveEntry.id,
+      fileId: project.driveMappings?.[CHARACTER_CATEGORY]?.[driveEntry.id] || null,
+      json: normalized,
+    };
+    saveProjectsToStorage();
+    logLine(`Saved voice settings for ${name}.`);
     return record.settings;
   }
 
@@ -4384,6 +4676,208 @@ Please:
     logLink(`Download ${fileName}`, url, fileName);
   }
 
+  function audioChapterKey(bookNumber, chapterNumber) {
+    return `book_${bookNumber}_chapter_${chapterNumber}`;
+  }
+
+  function sanitizeForFilename(name) {
+    return (name || "Novel")
+      .replace(/[^a-z0-9]+/gi, "_")
+      .replace(/^_+|_+$/g, "")
+      .replace(/_{2,}/g, "_")
+      .substring(0, 60) || "Novel";
+  }
+
+  function buildAudioFilename(novelName, bookNumber, chapterNumber, paragraphNumber = null, ext = "mp3") {
+    const safeName = sanitizeForFilename(novelName || "Novel");
+    const paragraphPart =
+      paragraphNumber !== null && paragraphNumber !== undefined ? `_P${paragraphNumber}` : "";
+    return `${safeName}_B${bookNumber}_C${chapterNumber}${paragraphPart}.${ext}`;
+  }
+
+  function describeTtsContext(label, payload, voiceProfile) {
+    logLine(
+      `${label}: model=${payload.model}, voice=${payload.voice}, speed=${payload.speed || 1}, ` +
+        `chars=${payload.input?.length || 0}, source=${voiceProfile?.source || "unknown"}`
+    );
+  }
+
+  function buildTtsPayload(text, voiceProfile) {
+    const input = (text || "").slice(0, 4000);
+    const payload = {
+      model: voiceProfile.ttsModel || DEFAULT_TTS_MODEL,
+      voice: voiceProfile.voice || defaultVoice(),
+      input,
+      response_format: "mp3",
+    };
+    const speed = clampNumber(voiceProfile.speed, 0.25, 4, 1);
+    if (speed && speed !== 1) payload.speed = speed;
+    return payload;
+  }
+
+  async function requestTtsClip(project, options) {
+    const {
+      text,
+      bookNumber,
+      chapterNumber,
+      paragraphNumber = null,
+      characterName = null,
+      novelName = "",
+    } = options;
+    if (!text) throw new Error("Text is required for TTS.");
+    if (!bookNumber || !chapterNumber) throw new Error("Book and chapter numbers are required for TTS.");
+
+    await fetchOpenAIVoices();
+    const voiceProfile = resolveVoiceProfile(project, characterName);
+    const payload = buildTtsPayload(text, voiceProfile);
+    const label = characterName ? `TTS for ${characterName}` : "Narrator TTS";
+    describeTtsContext(label, payload, voiceProfile);
+
+    let blob = null;
+    try {
+      blob = await openaiAudio("/audio/speech", payload, label);
+    } catch (e) {
+      logLine(`TTS request failed (${label}): ${e.message}`, true);
+      throw e;
+    }
+
+    const parentId = await ensureCategoryFolder(project, "audio");
+    const filename = buildAudioFilename(novelName || project.name || "Novel", bookNumber, chapterNumber, paragraphNumber);
+    const driveEntry = await uploadBlobToDrive(filename, blob, parentId, null);
+    const chapterKey = audioChapterKey(bookNumber, chapterNumber);
+    project.audio.paragraphs[chapterKey] = project.audio.paragraphs[chapterKey] || {};
+    const clipMeta = {
+      driveId: driveEntry.id,
+      filename,
+      voice: payload.voice,
+      model: payload.model,
+      speed: payload.speed || 1,
+      character: characterName || "narrator",
+      paragraphNumber,
+      created_at: new Date().toISOString(),
+    };
+    const paragraphKey = paragraphNumber !== null && paragraphNumber !== undefined ? paragraphNumber : "full";
+    project.audio.paragraphs[chapterKey][paragraphKey] = clipMeta;
+    saveProjectsToStorage();
+
+    const url = URL.createObjectURL(blob);
+    logLine(`Audio ready (${label}). Saved metadata: ${JSON.stringify(clipMeta)}`);
+    logLink(`Download ${filename}`, url, filename);
+    logLine(`Saved to Drive ID ${driveEntry.id}`);
+    return { blob, filename, driveEntry, chapterKey };
+  }
+
+  async function mergeAudioWithFfmpeg(blobs = []) {
+    if (!blobs.length) throw new Error("No blobs supplied to merge.");
+    const { ffmpeg, fetchFile } = await ensureFfmpegReady();
+    const sessionId = `merge_${Date.now()}`;
+    const manifestName = `${sessionId}_list.txt`;
+    logLine(`FFmpeg merge session ${sessionId} started with ${blobs.length} clip(s).`);
+
+    const manifestLines = [];
+    blobs.forEach((blob, idx) => {
+      const filename = `${sessionId}_clip_${idx}.mp3`;
+      ffmpeg.FS("writeFile", filename, fetchFile(blob));
+      manifestLines.push(`file '${filename}'`);
+    });
+    ffmpeg.FS("writeFile", manifestName, new TextEncoder().encode(manifestLines.join("\n")));
+
+    await ffmpeg.run("-f", "concat", "-safe", "0", "-i", manifestName, "-c", "copy", `${sessionId}_out.mp3`);
+    const mergedData = ffmpeg.FS("readFile", `${sessionId}_out.mp3`);
+
+    // Best-effort cleanup
+    try {
+      ffmpeg.FS("unlink", manifestName);
+      manifestLines.forEach((_, idx) => ffmpeg.FS("unlink", `${sessionId}_clip_${idx}.mp3`));
+      ffmpeg.FS("unlink", `${sessionId}_out.mp3`);
+    } catch (cleanupErr) {
+      logLine(`FFmpeg cleanup warning: ${cleanupErr.message}`);
+    }
+
+    logLine(`FFmpeg merge session ${sessionId} completed. Output size ${(mergedData?.length || 0).toLocaleString()} bytes.`);
+    return new Blob([mergedData.buffer], { type: "audio/mpeg" });
+  }
+
+  function concatenateAudioBlobs(blobs = []) {
+    if (!blobs.length) throw new Error("No blobs supplied to merge.");
+    logLine("Concatenating audio blobs as a fallback merge (no FFmpeg).", true);
+    return new Blob(blobs, { type: "audio/mpeg" });
+  }
+
+  async function mergeChapterAudio(project, bookNumber, chapterNumber, novelName = "") {
+    const chapterKey = audioChapterKey(bookNumber, chapterNumber);
+    const clips = project.audio?.paragraphs?.[chapterKey];
+    if (!clips || !Object.keys(clips).length) {
+      logLine("No paragraph audio stored for this chapter yet.", true);
+      return null;
+    }
+    logLine(
+      `Preparing to merge ${Object.keys(clips).length} clip(s) for Book ${bookNumber}, Chapter ${chapterNumber}.`
+    );
+    const ordered = Object.entries(clips)
+      .map(([k, v]) => ({
+        paragraph: k === "full" ? Number.MAX_SAFE_INTEGER : parseInt(k, 10),
+        data: v,
+      }))
+      .filter((c) => c.data?.driveId)
+      .sort((a, b) => a.paragraph - b.paragraph);
+
+    if (!ordered.length) {
+      logLine("No clips with Drive IDs found to merge.", true);
+      return null;
+    }
+
+    logLine(
+      `Merge order: ${ordered
+        .map((c) => `${c.paragraph === Number.MAX_SAFE_INTEGER ? "full" : c.paragraph} (${c.data.filename || "?"})`)
+        .join(", ")}`
+    );
+
+    const blobs = [];
+    for (const clip of ordered) {
+      try {
+        const fetched = await downloadDriveFile(clip.data.driveId);
+        if (fetched?.blob) {
+          blobs.push(fetched.blob);
+          logLine(
+            `Fetched audio clip ${clip.data.filename || clip.data.driveId} (paragraph ${clip.paragraph}). Size ${(fetched.blob.size || 0).toLocaleString()} bytes.`
+          );
+        }
+      } catch (e) {
+        logLine(`Unable to fetch audio clip ${clip.data.filename || clip.data.driveId}: ${e.message}`, true);
+      }
+    }
+    if (!blobs.length) {
+      logLine("No downloadable audio clips were found to merge.", true);
+      return null;
+    }
+
+    let mergedBlob = null;
+    try {
+      mergedBlob = await mergeAudioWithFfmpeg(blobs);
+      logLine("Merged audio using FFmpeg.wasm.");
+    } catch (mergeErr) {
+      logLine(`FFmpeg merge failed (${mergeErr.message}); using blob concatenation fallback.`, true);
+      mergedBlob = concatenateAudioBlobs(blobs);
+    }
+    const filename = buildAudioFilename(novelName || project.name || "Novel", bookNumber, chapterNumber, null, "mp3");
+    const parentId = await ensureCategoryFolder(project, "audio");
+    const existingId = project.audio?.merged?.[chapterKey]?.driveId || null;
+    logLine(`Uploading merged audio (${filename}) to Drive...`);
+    const driveEntry = await uploadBlobToDrive(filename, mergedBlob, parentId, existingId);
+    project.audio.merged[chapterKey] = {
+      driveId: driveEntry.id,
+      filename,
+      paragraphs: ordered.map((c) => c.paragraph),
+      updated_at: new Date().toISOString(),
+    };
+    saveProjectsToStorage();
+    const url = URL.createObjectURL(mergedBlob);
+    logLink(`Download merged chapter audio`, url, filename);
+    logLine(`Merged audio saved to Drive ID ${driveEntry.id}`);
+    return { filename, driveEntry };
+  }
+
   async function ttsForChapter(project) {
     const { bookNumber, act, chapterNum } = getSelectedBookActChapter(project);
     if (!bookNumber || !act || !chapterNum) {
@@ -4394,10 +4888,8 @@ Please:
     project.chapters = project.chapters || {};
     const key = chapterKey(bookNumber, act, chapterNum);
     const entry = project.chapters[key];
-    let text;
-    if (entry && entry.text) {
-      text = entry.text;
-    } else {
+    let text = entry?.text || "";
+    if (!text) {
       text = prompt("No stored text found. Paste the chapter text to read aloud:", "");
       if (!text) {
         logLine("No text provided.", true);
@@ -4405,60 +4897,63 @@ Please:
       }
     }
 
-    const maxChars = 3500;
-    let narratorText = text;
-    if (text.length > maxChars) {
-      narratorText = text.slice(0, maxChars);
-      logLine("Chapter text is long; truncating to " + maxChars + " characters for narrator TTS.");
+    const paragraphs = text
+      .split(/\n\s*\n+/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const paraHint = paragraphs.length ? `1-${paragraphs.length}` : "";
+    const paraInput = prompt(
+      `Enter paragraph number to render (leave blank for full custom blurb${paraHint ? `, range ${paraHint}` : ""}):`,
+      "1"
+    );
+    let paragraphNumber = null;
+    let blurb = "";
+    if (paraInput) {
+      paragraphNumber = parseInt(paraInput, 10);
+      if (!Number.isNaN(paragraphNumber) && paragraphs[paragraphNumber - 1]) {
+        blurb = paragraphs[paragraphNumber - 1];
+      }
+    }
+    if (!blurb) {
+      blurb = prompt("Enter the text to render for this clip:", paragraphs[0] || text.slice(0, 1200));
+    }
+    if (!blurb) {
+      logLine("No text supplied for TTS.", true);
+      return;
     }
 
-    logLine("Generating narrator TTS (voice: alloy)...");
-    const narratorBlob = await openaiAudio("/audio/speech", {
-      model: "tts-1",
-      voice: "alloy",
-      input: narratorText,
-      response_format: "mp3",
-    });
-    const narratorUrl = URL.createObjectURL(narratorBlob);
-    const narratorFileName = `book${bookNumber}_act${act}_chapter${chapterNum}_narrator.mp3`;
-    logLine("Narrator audio ready:");
-    logLink("Download narrator audio", narratorUrl, narratorFileName);
+    const characterName = prompt(
+      "Optional: character name for this clip (blank uses narrator settings)",
+      currentCharacterName || ""
+    );
 
-    if (confirm("Generate a MALE voice clip for some lines?")) {
-      const maleSnippet = prompt("Paste the text for the MALE voice:", "");
-      if (maleSnippet) {
-        logLine("Generating male TTS (voice: onyx)...");
-        const maleBlob = await openaiAudio("/audio/speech", {
-          model: "tts-1",
-          voice: "onyx",
-          input: maleSnippet.slice(0, maxChars),
-          response_format: "mp3",
-        });
-        const maleUrl = URL.createObjectURL(maleBlob);
-        const maleFileName = `book${bookNumber}_act${act}_chapter${chapterNum}_male.mp3`;
-        logLine("Male voice audio ready:");
-        logLink("Download male voice audio", maleUrl, maleFileName);
+    const requestOptions = {
+      text: blurb,
+      bookNumber,
+      chapterNumber: chapterNum,
+      paragraphNumber: Number.isNaN(Number(paragraphNumber)) ? null : paragraphNumber,
+      characterName: (characterName || "").trim() || null,
+      novelName: project.name,
+    };
+
+    logLine(`Submitting TTS request with options: ${JSON.stringify(requestOptions)}`);
+    let result = null;
+    try {
+      result = await requestTtsClip(project, requestOptions);
+    } catch (e) {
+      logLine(`TTS request aborted: ${e.message}`, true);
+      return null;
+    }
+
+    if (confirm("Merge stored paragraph audio for this chapter now?")) {
+      try {
+        await mergeChapterAudio(project, bookNumber, chapterNum, project.name);
+      } catch (e) {
+        logLine(`Failed to merge audio: ${e.message}`, true);
       }
     }
 
-    if (confirm("Generate a FEMALE voice clip for some lines?")) {
-      const femaleSnippet = prompt("Paste the text for the FEMALE voice:", "");
-      if (femaleSnippet) {
-        logLine("Generating female TTS (voice: nova)...");
-        const femaleBlob = await openaiAudio("/audio/speech", {
-          model: "tts-1",
-          voice: "nova",
-          input: femaleSnippet.slice(0, maxChars),
-          response_format: "mp3",
-        });
-        const femaleUrl = URL.createObjectURL(femaleBlob);
-        const femaleFileName = `book${bookNumber}_act${act}_chapter${chapterNum}_female.mp3`;
-        logLine("Female voice audio ready:");
-        logLink("Download female voice audio", femaleUrl, femaleFileName);
-      }
-    }
-
-    logLine("TTS generation complete.");
+    return result;
   }
 
   async function soraStub() {
@@ -4859,6 +5354,7 @@ Please:
     }
 
     docs.forEach((doc) => {
+      const isAudioDoc = (doc.mimeType || "").startsWith("audio/") || /\.mp3$/i.test(doc.baseName || doc.filename || "");
       const $row = $("<div>").addClass("doc-row");
       $row.append($("<div>").text(doc.filename));
       $row.append($("<div>").text(doc.mimeType || "unknown"));
@@ -4875,6 +5371,18 @@ Please:
         }
       });
       $actions.append($view);
+
+      if (isAudioDoc) {
+        const $play = $("<button>").addClass("icon-button").attr("title", "Play inline").text("▶️");
+        $play.on("click", async () => {
+          try {
+            await playDriveAudioInline(project, doc);
+          } catch (e) {
+            logLine(`Inline audio play failed for ${doc.filename}: ${e.message}`, true);
+          }
+        });
+        $actions.append($play);
+      }
 
       if (doc.isDraft && category === CHARACTER_CATEGORY) {
         const $promote = $("<button>").text("⬆️ Promote");
@@ -4957,6 +5465,51 @@ Please:
     $("#image-viewer-caption").text("");
   }
 
+  function clearDocAudioPreview() {
+    if (docAudioElement) {
+      try {
+        docAudioElement.pause();
+      } catch (_) {}
+    }
+    docAudioElement = null;
+    if (docAudioUrl) {
+      URL.revokeObjectURL(docAudioUrl);
+    }
+    docAudioUrl = null;
+  }
+
+  function renderAudioPreview(blob, filename, contentType = "audio/mpeg") {
+    clearDocAudioPreview();
+    const url = URL.createObjectURL(blob);
+    docAudioUrl = url;
+    const $preview = $("#doc-preview");
+    $preview.empty();
+    $preview.append($("<div>").text(`Inline audio preview: ${filename}`));
+    const $audio = $("<audio>")
+      .attr("controls", true)
+      .attr("src", url)
+      .attr("type", contentType)
+      .css("width", "100%")
+      .css("margin-top", "6px");
+    $audio.prop("autoplay", true);
+    $preview.append($audio);
+    docAudioElement = $audio[0];
+    logLine(`Inline audio player ready for ${filename}.`);
+  }
+
+  async function playDriveAudioInline(project, doc) {
+    logLine(`Requesting inline audio playback for ${doc.filename} (${doc.id})...`);
+    const content = await downloadDriveFile(doc.id);
+    if (!content?.blob) throw new Error("No blob content available for playback.");
+    if (!(content.contentType || "").startsWith("audio/")) {
+      logLine(
+        `Audio playback requested for non-audio mimeType (${content.contentType || "unknown"}). Attempting anyway.`,
+        true
+      );
+    }
+    renderAudioPreview(content.blob, doc.filename, content.contentType || "audio/mpeg");
+  }
+
   async function viewDriveDocument(project, doc) {
     const content = await downloadDriveFile(doc.id);
     await previewDocument(project, doc, content);
@@ -4978,6 +5531,7 @@ Please:
   async function previewDocument(project, doc, existingContent = null) {
     const content = existingContent || (await downloadDriveFile(doc.id));
     const $preview = $("#doc-preview");
+    clearDocAudioPreview();
     $preview.empty();
     if (content.type === "text") {
       $preview.text(content.data || "(no text)");
@@ -4985,6 +5539,11 @@ Please:
     }
     if (content.type === "image") {
       $preview.append($("<img>").attr("src", content.data));
+      return;
+    }
+
+    if (content.type === "audio" || (content.contentType || "").startsWith("audio/")) {
+      renderAudioPreview(content.blob, doc.filename, content.contentType || "audio/mpeg");
       return;
     }
 
@@ -5020,6 +5579,10 @@ Please:
     setAppLocked(true);
     setCharacterMode(characterConversationMode);
     collapseAllMenuPanels();
+
+    fetchOpenAIVoices()
+      .then(() => refreshVoiceSelectors(getCurrentProject() || { name: "" }))
+      .catch(() => {});
 
     $("#google-client-id-input").val(googleClientId);
     updateGoogleClientIdStatus();
@@ -5542,6 +6105,33 @@ Please:
         await reviewWholeBook(project);
       } catch (e) {
         logLine("Error in book-level review: " + e.message, true);
+      }
+    });
+
+    $("#refresh-voice-list-btn").on("click", async function () {
+      await fetchOpenAIVoices(true);
+      const project = getCurrentProject();
+      if (project) await refreshVoiceSelectors(project);
+    });
+
+    $("#save-narrator-settings-btn").on("click", function () {
+      const project = getCurrentProject();
+      if (!project) return;
+      const settings = readNarratorVoiceForm(project);
+      saveNarratorSettings(project, settings);
+    });
+
+    $("#save-character-settings-btn").on("click", async function () {
+      const project = getCurrentProject();
+      if (!project || !currentCharacterName) {
+        alert("Select a character first.");
+        return;
+      }
+      try {
+        await saveCharacterVoiceSettings(project, currentCharacterName, readCharacterVoiceForm(project));
+        logLine(`Voice settings saved for ${currentCharacterName}.`);
+      } catch (e) {
+        logLine("Error saving character voice settings: " + e.message, true);
       }
     });
 
