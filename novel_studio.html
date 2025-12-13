@@ -17,7 +17,7 @@
     #app {
       display: flex;
       height: 100vh;
-      padding-bottom: 180px; /* keep controls visible when console is expanded */
+      min-height: 100vh;
       box-sizing: border-box;
     }
     #sidebar {
@@ -28,7 +28,7 @@
       box-sizing: border-box;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
       overflow-y: auto;
     }
     #main {
@@ -108,6 +108,38 @@
       font-size: 11px;
       padding: 2px 6px;
       margin-left: 4px;
+    }
+    .collapse-panel {
+      border: 1px solid #1f2833;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #0d1117;
+    }
+    .collapse-panel summary {
+      cursor: pointer;
+      padding: 8px 10px;
+      font-weight: bold;
+      color: #66fcf1;
+      background: #0f111a;
+      border-bottom: 1px solid #1f2833;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .collapse-panel summary::-webkit-details-marker {
+      display: none;
+    }
+    .collapse-panel .summary-meta {
+      font-size: 11px;
+      color: #c5c6c7;
+    }
+    .collapse-body {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
     #controls {
       padding: 8px;
@@ -981,14 +1013,19 @@
 </div>
 <div id="app" class="locked">
   <div id="sidebar">
-    <div class="section-title">API Key</div>
-    <input type="password" id="api-key-input" placeholder="Enter OpenAI API key" />
-    <button id="set-api-key-btn">Set API Key</button>
-    <div id="api-key-status" style="font-size:11px;color:#c5c6c7;margin-top:4px;">
-      Not set
-    </div>
+    <details class="collapse-panel" id="api-key-panel">
+      <summary>
+        <span>API Key</span>
+        <span class="summary-meta" id="api-key-summary">Hidden</span>
+      </summary>
+      <div class="collapse-body">
+        <input type="password" id="api-key-input" placeholder="Enter OpenAI API key" />
+        <button id="set-api-key-btn">Set API Key</button>
+        <div id="api-key-status" style="font-size:11px;color:#c5c6c7;">Not set</div>
+      </div>
+    </details>
 
-    <div class="section-title" style="margin-top:10px;">Assistant Model</div>
+    <div class="section-title">Assistant Model</div>
     <select id="model-select">
       <option value="gpt-4.1">gpt-4.1 (latest default)</option>
       <option value="gpt-4o">gpt-4o</option>
@@ -1000,18 +1037,29 @@
 
     <div class="divider"></div>
 
-    <div class="section-title">Projects (novel - ...)</div>
-    <div id="project-list"></div>
+    <details class="collapse-panel" id="project-panel">
+      <summary>
+        <span>Projects (novel - ...)</span>
+        <span class="summary-meta" id="project-summary">None selected</span>
+      </summary>
+      <div class="collapse-body">
+        <div id="project-list"></div>
 
-    <input type="text" id="new-project-name" placeholder="New project name (without 'novel -')" style="margin-top:6px;" />
-    <button id="create-project-btn">Create Project</button>
-    <button id="open-project-picker-btn" class="small">Choose Drive Project</button>
-    <button id="delete-project-btn" style="background:#ff6b6b;color:#0b0c10;margin-top:4px;">Delete Selected</button>
-    <button id="exit-drive-project-btn" style="background:#444;color:#e5e5e5;margin-top:4px;">Exit Drive Project</button>
+        <input
+          type="text"
+          id="new-project-name"
+          placeholder="New project name (without 'novel -')"
+        />
+        <button id="create-project-btn">Create Project</button>
+        <button id="open-project-picker-btn" class="small">Choose Drive Project</button>
+        <button id="delete-project-btn" style="background:#ff6b6b;color:#0b0c10;">Delete Selected</button>
+        <button id="exit-drive-project-btn" style="background:#444;color:#e5e5e5;">Exit Drive Project</button>
 
-    <div id="current-project-label" style="margin-top:10px;font-size:12px;color:#c5c6c7;">
-      Current project: <span id="current-project-name">None</span>
-    </div>
+        <div id="current-project-label" style="font-size:12px;color:#c5c6c7;">
+          Current project: <span id="current-project-name">None</span>
+        </div>
+      </div>
+    </details>
 
     <div class="section-title" style="margin-top:14px;">Workspace Menus</div>
 
@@ -1983,6 +2031,24 @@
     $("#status-bar").text(message);
   }
 
+  function updateApiKeySummary(message) {
+    $("#api-key-summary").text(message || "Hidden");
+  }
+
+  function updateProjectSummaryLabel() {
+    const count = Object.keys(projects || {}).length;
+    const current = currentProjectName ? PROJECT_PREFIX + currentProjectName : null;
+    if (current) {
+      $("#project-summary").text(current);
+      return;
+    }
+    if (count === 0) {
+      $("#project-summary").text("None yet");
+      return;
+    }
+    $("#project-summary").text(`${count} project${count === 1 ? "" : "s"}`);
+  }
+
   function fetchWithTimeout(url, options, label = "request") {
     const controller = new AbortController();
     const merged = { ...options, signal: controller.signal };
@@ -2029,6 +2095,8 @@
       logLine("Failed to load projects from localStorage: " + e, true);
       projects = {};
     }
+
+    updateProjectSummaryLabel();
   }
 
   function updateModelStatus() {
@@ -2283,6 +2351,7 @@
     const names = Object.keys(projects).sort();
     if (names.length === 0) {
       $list.append($("<div>").text("(no projects yet)"));
+      updateProjectSummaryLabel();
       return;
     }
     names.forEach((name) => {
@@ -2302,6 +2371,8 @@
       $item.append($name).append($actions);
       $list.append($item);
     });
+
+    updateProjectSummaryLabel();
   }
 
   function ensureProjectStructure(project) {
@@ -2451,6 +2522,7 @@
     const project = ensureProjectStructure(projects[name]);
     currentProjectName = name;
     $("#current-project-name").text(PROJECT_PREFIX + project.name);
+    updateProjectSummaryLabel();
     currentCharacterName = null;
     resetCharacterCanvasSession();
     hideCharacterCanvas();
@@ -2488,6 +2560,7 @@
   function exitDriveProject() {
     currentProjectName = null;
     $("#current-project-name").text("None");
+    updateProjectSummaryLabel();
     hideCharacterCanvas();
     resetCharacterCanvasSession();
     ensureDocPreviewMessage("Select a Drive project to see its documents.");
@@ -5286,7 +5359,17 @@ Please:
     const files = await listDriveFiles(parentId);
     const docs = [];
 
+    const shouldHideDocument = (file) => {
+      const mime = file.mimeType || "";
+      return (
+        mime === "application/vnd.google-apps.document" ||
+        mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+        /\.docx$/i.test(file.name || "")
+      );
+    };
+
     const pushDoc = (file, prefix = null, characterName = null, parentFolderId = null, isDraft = false) => {
+      if (shouldHideDocument(file)) return;
       const display = prefix ? `${prefix}/${file.name}` : file.name;
       docs.push({
         id: file.id,
@@ -5572,6 +5655,7 @@ Please:
     setConsoleExpanded(false);
     $("#api-key-input").val(apiKey);
     $("#api-key-status").text("Preloaded test key (change as needed)");
+    updateApiKeySummary(apiKey ? "Set" : "Not set");
     logLine("API key preloaded for testing. Replace or clear as needed.");
     logLine("Novel Studio HTML client loaded. Sign in with Google Drive to begin.");
     setStatus("Connect Google Drive to begin.");
@@ -5839,10 +5923,12 @@ Please:
       if (!key) {
         apiKey = null;
         $("#api-key-status").text("Not set");
+        updateApiKeySummary("Not set");
         logLine("API key cleared.");
       } else {
         apiKey = key;
         $("#api-key-status").text("Set (stored only in memory)");
+        updateApiKeySummary("Set");
         logLine("API key set in memory.");
       }
     });
@@ -5877,6 +5963,7 @@ Please:
       saveProjectsToStorage();
       currentProjectName = null;
       $("#current-project-name").text("None");
+      updateProjectSummaryLabel();
       refreshProjectListUI();
       refreshCharacterSelectUI({ characters: {} });
       logLine("Deleted project (local only).");
