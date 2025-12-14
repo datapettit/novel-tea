@@ -5722,19 +5722,6 @@ Please:
   async function viewDriveDocument(project, doc) {
     const content = await downloadDriveFile(doc.id);
     await previewDocument(project, doc, content);
-    if (content.type === "image") {
-      showImageModal(content.data, doc.filename);
-      return;
-    }
-    if (content.type === "text") {
-      return;
-    }
-
-    if (content.blob) {
-      const url = URL.createObjectURL(content.blob);
-      window.open(url, "_blank");
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    }
   }
 
   async function previewDocument(project, doc, existingContent = null) {
