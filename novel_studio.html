@@ -168,7 +168,7 @@
       padding: 10px;
       box-sizing: border-box;
       gap: 10px;
-      overflow: hidden;
+      overflow-y: auto;
     }
     #canvas-gallery {
       display: flex;
@@ -784,14 +784,44 @@
       background: #0d1117;
       padding: 10px;
       min-height: 160px;
-      overflow: auto;
+      max-height: 60vh;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      overflow: hidden;
       font-size: 12px;
       line-height: 1.5;
     }
+    #doc-preview .doc-preview-content {
+      flex: 1;
+      overflow: auto;
+      border: 1px solid #1f2833;
+      border-radius: 4px;
+      padding: 8px;
+      background: #0b0c10;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    #doc-preview .doc-preview-content.code {
+      font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+    #doc-preview .doc-preview-content.media {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #doc-preview .doc-preview-code {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     #doc-preview img {
       max-width: 100%;
+      max-height: 100%;
+      width: 100%;
       height: auto;
       display: block;
+      object-fit: contain;
     }
     #doc-canvas-header {
       display: flex;
@@ -5371,7 +5401,23 @@ Please:
   }
 
   function ensureDocPreviewMessage(msg) {
-    $("#doc-preview").empty().text(msg || "Select a document to preview its contents here.");
+    clearDocAudioPreview();
+    setDocPreviewContent(
+      $("<div>").text(msg || "Select a document to preview its contents here."),
+      "message"
+    );
+  }
+
+  function setDocPreviewContent($node, extraClass = "") {
+    const $preview = $("#doc-preview");
+    $preview.empty();
+    const $content = $("<div>").addClass("doc-preview-content");
+    if (extraClass) {
+      $content.addClass(extraClass);
+    }
+    $content.append($node);
+    $preview.append($content);
+    return $content;
   }
 
   function handlePanelVisibility(panelId) {
@@ -5645,9 +5691,8 @@ Please:
     clearDocAudioPreview();
     const url = URL.createObjectURL(blob);
     docAudioUrl = url;
-    const $preview = $("#doc-preview");
-    $preview.empty();
-    $preview.append($("<div>").text(`Inline audio preview: ${filename}`));
+    const $wrapper = $("<div>");
+    $wrapper.append($("<div>").text(`Inline audio preview: ${filename}`));
     const $audio = $("<audio>")
       .attr("controls", true)
       .attr("src", url)
@@ -5655,7 +5700,8 @@ Please:
       .css("width", "100%")
       .css("margin-top", "6px");
     $audio.prop("autoplay", true);
-    $preview.append($audio);
+    $wrapper.append($audio);
+    setDocPreviewContent($wrapper, "media");
     docAudioElement = $audio[0];
     logLine(`Inline audio player ready for ${filename}.`);
   }
@@ -5693,15 +5739,19 @@ Please:
 
   async function previewDocument(project, doc, existingContent = null) {
     const content = existingContent || (await downloadDriveFile(doc.id));
-    const $preview = $("#doc-preview");
     clearDocAudioPreview();
-    $preview.empty();
     if (content.type === "text") {
-      $preview.text(content.data || "(no text)");
+      const $code = $("<pre>")
+        .addClass("doc-preview-code")
+        .attr("contenteditable", true)
+        .attr("spellcheck", false)
+        .text(content.data || "(no text)");
+      setDocPreviewContent($code, "code");
       return;
     }
     if (content.type === "image") {
-      $preview.append($("<img>").attr("src", content.data));
+      const $img = $("<img>").attr("src", content.data).attr("alt", doc.filename || "Preview image");
+      setDocPreviewContent($img, "media");
       return;
     }
 
@@ -5714,12 +5764,14 @@ Please:
     if (blob) {
       const url = URL.createObjectURL(blob);
       const $link = $("<a>").addClass("download-link").attr("href", url).attr("download", doc.filename).text("Download file");
-      $preview.append($("<div>").text("Preview unavailable for this file type. Download instead:"));
-      $preview.append($link);
+      const $unknown = $("<div>")
+        .append($("<div>").text("Preview unavailable for this file type. Download instead:"))
+        .append($link);
+      setDocPreviewContent($unknown);
       return;
     }
 
-    $preview.text("Preview unavailable for this file type.");
+    setDocPreviewContent($("<div>").text("Preview unavailable for this file type."));
   }
 
   // ==============================
