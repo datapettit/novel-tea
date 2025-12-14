@@ -5596,19 +5596,6 @@ Please:
   async function viewDriveDocument(project, doc) {
     const content = await downloadDriveFile(doc.id);
     await previewDocument(project, doc, content);
-    if (content.type === "image") {
-      showImageModal(content.data, doc.filename);
-      return;
-    }
-    if (content.type === "text") {
-      return;
-    }
-
-    if (content.blob) {
-      const url = URL.createObjectURL(content.blob);
-      window.open(url, "_blank");
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    }
   }
 
   async function previewDocument(project, doc, existingContent = null) {
@@ -5633,9 +5620,63 @@ Please:
     const blob = content.blob;
     if (blob) {
       const url = URL.createObjectURL(blob);
-      const $link = $("<a>").addClass("download-link").attr("href", url).attr("download", doc.filename).text("Download file");
-      $preview.append($("<div>").text("Preview unavailable for this file type. Download instead:"));
-      $preview.append($link);
+      const contentType = content.contentType || "";
+      let renderedInline = false;
+
+      if (contentType.startsWith("video/")) {
+        const $video = $("<video>")
+          .attr("controls", true)
+          .attr("src", url)
+          .css({ width: "100%", maxHeight: "480px" });
+        $preview.append($video);
+        renderedInline = true;
+      } else if (contentType.startsWith("application/pdf")) {
+        const $pdfFrame = $("<iframe>")
+          .attr("src", url)
+          .attr("title", doc.filename || "Document preview")
+          .css({ width: "100%", minHeight: "500px", border: "1px solid #ccc" });
+        $preview.append($pdfFrame);
+        renderedInline = true;
+      } else if (contentType) {
+        const $object = $("<object>")
+          .attr("data", url)
+          .attr("type", contentType || "application/octet-stream")
+          .css({ width: "100%", minHeight: "400px", border: "1px solid #ccc" });
+        $preview.append($object);
+        renderedInline = true;
+      } else {
+        const $object = $("<object>")
+          .attr("data", url)
+          .attr("type", "application/octet-stream")
+          .css({ width: "100%", minHeight: "400px", border: "1px solid #ccc" });
+        $preview.append($object);
+        renderedInline = true;
+      }
+
+      const $controls = $("<div>").addClass("doc-download-controls");
+      const $open = $("<a>")
+        .attr("href", url)
+        .attr("target", "_blank")
+        .attr("rel", "noopener")
+        .text("Open in new tab");
+      const $download = $("<a>")
+        .addClass("download-link")
+        .attr("href", url)
+        .attr("download", doc.filename)
+        .text("Download file");
+      $controls.append($("<div>").text("Use the controls below to open or download this file:"));
+      $controls.append(
+        $("<div>")
+          .append($open)
+          .append($("<span>").text(" • "))
+          .append($download)
+      );
+
+      if (!renderedInline || content.type === "binary") {
+        $preview.append($("<div>").text("Preview unavailable for this file type."));
+      }
+
+      $preview.append($controls);
       return;
     }
 
