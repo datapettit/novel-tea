@@ -1374,6 +1374,10 @@
   let googleInitPromise = null;
   let googleSdkLoadPromise = null;
   let googleUserEmail = null;
+  const VISIBILITY_RETURN_DEBOUNCE_MS = 1200;
+  const VISIBILITY_RETURN_COOLDOWN_MS = 8000;
+  let visibilityReturnTimer = null;
+  let lastVisibilityReturnPromptAt = 0;
 
   function resetGoogleSdkState() {
     logLine("resetGoogleSdkState: begin");
@@ -2555,6 +2559,61 @@
       .finally(() => {
         setStatus(`Project ${name} ready.`);
       });
+  }
+
+  async function reloadCurrentProjectFromDrive() {
+    const project = getCurrentProject();
+    if (!project) {
+      logLine("No Drive project loaded to refresh.", true);
+      return;
+    }
+    if (!googleAuthorized || !googleDriveReady) {
+      logLine("Google Drive is not ready; cannot refresh project now.", true);
+      return;
+    }
+
+    beginLongLoading();
+    setStatus(`Refreshing ${PROJECT_PREFIX + project.name} from Drive...`);
+    try {
+      await syncProjectsFromDrive();
+      refreshProjectListUI();
+      await selectProject(project.name);
+      setStatus(`Reloaded ${PROJECT_PREFIX + project.name} from Drive and vector stores.`);
+      logLine(`Project ${project.name} refreshed from Drive and vector stores after returning to the page.`);
+    } catch (e) {
+      logLine(`Project reload failed: ${e.message}`, true);
+      setStatus(`Project reload failed: ${e.message}`);
+    } finally {
+      endLongLoading();
+    }
+  }
+
+  function scheduleReturnPrompt() {
+    if (document.hidden) return;
+    if (!googleAuthorized || !googleDriveReady || !currentProjectName) return;
+
+    const now = Date.now();
+    if (now - lastVisibilityReturnPromptAt < VISIBILITY_RETURN_COOLDOWN_MS) return;
+
+    if (visibilityReturnTimer) {
+      clearTimeout(visibilityReturnTimer);
+    }
+
+    visibilityReturnTimer = setTimeout(async () => {
+      visibilityReturnTimer = null;
+      if (document.hidden) return;
+
+      lastVisibilityReturnPromptAt = Date.now();
+      const label = `${PROJECT_PREFIX}${currentProjectName}`;
+      const confirmReload = confirm(
+        `You're back in Novel Studio. Reload Drive data and resync vector stores for ${label}?`
+      );
+      if (confirmReload) {
+        await reloadCurrentProjectFromDrive();
+      } else {
+        logLine(`Skipped reload after returning to the page for ${label}.`);
+      }
+    }, VISIBILITY_RETURN_DEBOUNCE_MS);
   }
 
   function exitDriveProject() {
@@ -5663,6 +5722,12 @@ Please:
     setAppLocked(true);
     setCharacterMode(characterConversationMode);
     collapseAllMenuPanels();
+
+    const handleReturnToPage = () => scheduleReturnPrompt();
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) handleReturnToPage();
+    });
+    window.addEventListener("focus", handleReturnToPage);
 
     fetchOpenAIVoices()
       .then(() => refreshVoiceSelectors(getCurrentProject() || { name: "" }))
