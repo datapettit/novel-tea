@@ -3275,13 +3275,24 @@ When asked about photos:
     return names[0] || null;
   }
 
+  function normalizeCharacterName(name) {
+    if (!name) return null;
+    return name.replace(/\.[^/.]+$/, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim() || null;
+  }
+
   function deriveCharacterNameFromFilename(filename) {
     if (!filename) return null;
     const sheetMatch = filename.match(/^(.*)character\s*sheet/i);
-    if (!sheetMatch) return null;
-    const base = sheetMatch[1] || "";
-    const words = base.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-    return words || null;
+    if (sheetMatch) return normalizeCharacterName(sheetMatch[1] || "");
+    return null;
+  }
+
+  function deriveCharacterNameFromProfileDoc(filename) {
+    if (!filename) return null;
+    const base = filename.replace(/\.[^/.]+$/, "");
+    const profileMatch = base.match(/^(.*)\s+profile$/i);
+    if (profileMatch) return normalizeCharacterName(profileMatch[1] || "");
+    return normalizeCharacterName(base);
   }
 
   function deriveProfileName(filename) {
@@ -3335,18 +3346,36 @@ When asked about photos:
   async function refreshCharacterRoster(project, silent = false) {
     const docs = await fetchCategoryDocuments(project, CHARACTER_CATEGORY);
     await warmImageCacheForDocs(docs);
-    const roster = [];
+    const rosterNames = new Set();
     for (const doc of docs) {
-      const name = deriveCharacterNameFromFilename(doc.baseName || doc.filename);
-      if (!name) continue;
-      roster.push({ name, filename: doc.filename, driveId: doc.id });
-      const record = ensureCharacterRecord(project, name);
-      record.sheet = record.sheet || {};
-      record.sheet.filename = record.sheet.filename || doc.filename;
-      record.sheet.driveId = record.sheet.driveId || doc.id;
-      record.sheet.fileId = record.sheet.fileId || doc.mappedFileId || null;
-      record.sheet.ext = record.sheet.ext || (doc.baseName.split(".").pop() || "txt").toLowerCase();
-      const profileName = deriveProfileName(doc.baseName || doc.filename);
+      const nameCandidates = new Set();
+      const baseName = doc.baseName || doc.filename || "";
+
+      const derivedFromFolder = normalizeCharacterName(doc.characterName);
+      if (derivedFromFolder) nameCandidates.add(derivedFromFolder);
+
+      const sheetName = deriveCharacterNameFromFilename(baseName);
+      if (sheetName) nameCandidates.add(sheetName);
+
+      const profileDocName = deriveCharacterNameFromProfileDoc(baseName);
+      if (profileDocName) nameCandidates.add(profileDocName);
+
+      const profileName = deriveProfileName(baseName);
+      if (profileName) nameCandidates.add(profileName);
+
+      nameCandidates.forEach((name) => {
+        rosterNames.add(name);
+
+        const record = ensureCharacterRecord(project, name);
+        if (sheetName === name) {
+          record.sheet = record.sheet || {};
+          record.sheet.filename = record.sheet.filename || doc.filename;
+          record.sheet.driveId = record.sheet.driveId || doc.id;
+          record.sheet.fileId = record.sheet.fileId || doc.mappedFileId || null;
+          record.sheet.ext = record.sheet.ext || (baseName.split(".").pop() || "txt").toLowerCase();
+        }
+      });
+
       if (profileName) {
         const profileRecord = ensureCharacterRecord(project, profileName);
         const existingProfile = (profileRecord.photos || []).find((p) => p.type === "profile");
@@ -3367,6 +3396,8 @@ When asked about photos:
         }
       }
     }
+
+    const roster = Array.from(rosterNames).map((name) => ({ name }));
 
     renderCharacterRoster(project, roster);
     saveProjectsToStorage();
@@ -5359,17 +5390,7 @@ Please:
     const files = await listDriveFiles(parentId);
     const docs = [];
 
-    const shouldHideDocument = (file) => {
-      const mime = file.mimeType || "";
-      return (
-        mime === "application/vnd.google-apps.document" ||
-        mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-        /\.docx$/i.test(file.name || "")
-      );
-    };
-
     const pushDoc = (file, prefix = null, characterName = null, parentFolderId = null, isDraft = false) => {
-      if (shouldHideDocument(file)) return;
       const display = prefix ? `${prefix}/${file.name}` : file.name;
       docs.push({
         id: file.id,
