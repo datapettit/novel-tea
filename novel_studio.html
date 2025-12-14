@@ -5359,17 +5359,7 @@ Please:
     const files = await listDriveFiles(parentId);
     const docs = [];
 
-    const shouldHideDocument = (file) => {
-      const mime = file.mimeType || "";
-      return (
-        mime === "application/vnd.google-apps.document" ||
-        mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-        /\.docx$/i.test(file.name || "")
-      );
-    };
-
     const pushDoc = (file, prefix = null, characterName = null, parentFolderId = null, isDraft = false) => {
-      if (shouldHideDocument(file)) return;
       const display = prefix ? `${prefix}/${file.name}` : file.name;
       docs.push({
         id: file.id,
@@ -5408,6 +5398,16 @@ Please:
     return docs;
   }
 
+  function supportsInlineDocPreview(doc) {
+    const mime = (doc.mimeType || "").toLowerCase();
+    const name = (doc.baseName || doc.filename || "").toLowerCase();
+    if (mime.startsWith("image/") || mime.startsWith("audio/") || mime.startsWith("text/")) return true;
+    if (mime.includes("json") || mime.includes("yaml") || mime.includes("xml") || mime.includes("csv")) return true;
+    if (/\.(json|ya?ml|xml|csv|txt|md)$/i.test(name)) return true;
+    if (/\.mp3$/i.test(name)) return true;
+    return false;
+  }
+
   async function renderDocExplorer(project, category) {
     const $list = $("#doc-list");
     $list.empty();
@@ -5438,22 +5438,35 @@ Please:
 
     docs.forEach((doc) => {
       const isAudioDoc = (doc.mimeType || "").startsWith("audio/") || /\.mp3$/i.test(doc.baseName || doc.filename || "");
+      const supportsPreview = supportsInlineDocPreview(doc);
+      const driveUrl = `https://drive.google.com/open?id=${encodeURIComponent(doc.id)}`;
       const $row = $("<div>").addClass("doc-row");
       $row.append($("<div>").text(doc.filename));
       $row.append($("<div>").text(doc.mimeType || "unknown"));
       const dateText = doc.modifiedAt ? doc.modifiedAt.toLocaleString() : "Unknown";
       $row.append($("<div>").text(dateText));
       const $actions = $("<div>").addClass("doc-actions");
-      const $view = $("<button>").addClass("icon-button").attr("title", "Stream / view").text("👁️");
-      $view.on("click", async () => {
-        ensureDocPreviewMessage("Loading preview...");
-        try {
-          await viewDriveDocument(project, doc);
-        } catch (e) {
-          logLine("Error previewing document: " + e.message, true);
-        }
-      });
-      $actions.append($view);
+      if (supportsPreview) {
+        const $view = $("<button>").addClass("icon-button").attr("title", "Stream / view").text("👁️");
+        $view.on("click", async () => {
+          ensureDocPreviewMessage("Loading preview...");
+          try {
+            await viewDriveDocument(project, doc);
+          } catch (e) {
+            logLine("Error previewing document: " + e.message, true);
+          }
+        });
+        $actions.append($view);
+      } else {
+        const $openDrive = $("<button>")
+          .addClass("icon-button")
+          .attr("title", "Open in Google Drive")
+          .text("↗️");
+        $openDrive.on("click", () => {
+          window.open(driveUrl, "_blank", "noopener");
+        });
+        $actions.append($openDrive);
+      }
 
       if (isAudioDoc) {
         const $play = $("<button>").addClass("icon-button").attr("title", "Play inline").text("▶️");
