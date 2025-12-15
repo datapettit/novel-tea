@@ -1499,6 +1499,7 @@
   const VISIBILITY_RETURN_COOLDOWN_MS = 8000;
   let visibilityReturnTimer = null;
   let lastVisibilityReturnPromptAt = 0;
+  let driveReturnPromptRequested = false;
 
   function resetGoogleSdkState() {
     logLine("resetGoogleSdkState: begin");
@@ -2024,12 +2025,19 @@
     await driveFetch(`/files/${fileId}`, { method: "DELETE" });
   }
 
+  function scrollConsoleToBottom() {
+    const $log = $("#console-log");
+    requestAnimationFrame(() => {
+      $log.scrollTop($log[0].scrollHeight);
+    });
+  }
+
   function appendToConsole($content, isError = false) {
     const $line = $("<div>").addClass("line");
     if (isError) $line.addClass("error");
     $line.append($content);
     $("#console-log").append($line);
-    $("#console-log").scrollTop($("#console-log")[0].scrollHeight);
+    scrollConsoleToBottom();
   }
 
   function logLine(message, isError = false) {
@@ -2163,11 +2171,28 @@
     document.body.classList.remove("story-loading-active");
   }
 
+  async function ensureStoryPostLoadSync() {
+    const project = getCurrentProject();
+    if (!project) return;
+    try {
+      await alignVectorStoresToDrive(project);
+    } catch (e) {
+      logLine(`Post-story vector store sync failed: ${e.message}`, true);
+    }
+    try {
+      await initAssistantsForProject(project);
+    } catch (e) {
+      logLine(`Post-story assistant initialization failed: ${e.message}`, true);
+    }
+  }
+
   async function withStoryLoading(message, task) {
     showStoryLoadingModal(message);
     beginLongLoading();
     try {
-      return await task();
+      const result = await task();
+      await ensureStoryPostLoadSync();
+      return result;
     } finally {
       endLongLoading();
       hideStoryLoadingModal();
@@ -2767,12 +2792,12 @@
     }
   }
 
-  function scheduleReturnPrompt() {
+  function scheduleReturnPrompt(force = false) {
     if (document.hidden) return;
     if (!googleAuthorized || !googleDriveReady || !currentProjectName) return;
 
     const now = Date.now();
-    if (now - lastVisibilityReturnPromptAt < VISIBILITY_RETURN_COOLDOWN_MS) return;
+    if (!force && now - lastVisibilityReturnPromptAt < VISIBILITY_RETURN_COOLDOWN_MS) return;
 
     if (visibilityReturnTimer) {
       clearTimeout(visibilityReturnTimer);
@@ -2783,6 +2808,7 @@
       if (document.hidden) return;
 
       lastVisibilityReturnPromptAt = Date.now();
+      driveReturnPromptRequested = false;
       const label = `${PROJECT_PREFIX}${currentProjectName}`;
       const confirmReload = confirm(
         `You're back in Novel Studio. Reload Drive data and resync vector stores for ${label}?`
@@ -2793,6 +2819,11 @@
         logLine(`Skipped reload after returning to the page for ${label}.`);
       }
     }, VISIBILITY_RETURN_DEBOUNCE_MS);
+  }
+
+  function requestDriveReturnResyncPrompt() {
+    driveReturnPromptRequested = true;
+    scheduleReturnPrompt(true);
   }
 
   function exitDriveProject() {
@@ -2875,16 +2906,25 @@
       headers["OpenAI-Beta"] = "assistants=v2";
     }
     const requestLabel = label || `OpenAI ${method} ${path}`;
-    const res = await fetchWithTimeout("https://api.openai.com/v1" + path, {
-      method: method,
-      headers: headers,
-      body: body ? JSON.stringify(body) : null,
-    }, requestLabel);
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error("OpenAI API error (" + res.status + "): " + text);
+    const url = "https://api.openai.com/v1" + path;
+    try {
+      const res = await fetchWithTimeout(url, {
+        method: method,
+        headers: headers,
+        body: body ? JSON.stringify(body) : null,
+      }, requestLabel);
+      if (!res.ok) {
+        const text = await res.text();
+        const payload = body ? JSON.stringify(body) : "(no payload)";
+        logLine(`OpenAI API error ${res.status} for ${method} ${url}: ${text}. Payload: ${payload}`, true);
+        throw new Error("OpenAI API error (" + res.status + "): " + text);
+      }
+      return await res.json();
+    } catch (err) {
+      const payload = body ? JSON.stringify(body) : "(no payload)";
+      logLine(`OpenAI request failed for ${method} ${url}. Payload: ${payload}. Error: ${err.message}`, true);
+      throw err;
     }
-    return await res.json();
   }
 
   async function openaiFormData(path, formData, useAssistantsBeta = false, label = null) {
@@ -2896,16 +2936,23 @@
       headers["OpenAI-Beta"] = "assistants=v2";
     }
     const requestLabel = label || `OpenAI POST ${path}`;
-    const res = await fetchWithTimeout("https://api.openai.com/v1" + path, {
-      method: "POST",
-      headers: headers, // don't set Content-Type manually; browser will
-      body: formData,
-    }, requestLabel);
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error("OpenAI API error (" + res.status + "): " + text);
+    const url = "https://api.openai.com/v1" + path;
+    try {
+      const res = await fetchWithTimeout(url, {
+        method: "POST",
+        headers: headers, // don't set Content-Type manually; browser will
+        body: formData,
+      }, requestLabel);
+      if (!res.ok) {
+        const text = await res.text();
+        logLine(`OpenAI form-data error ${res.status} for POST ${url}: ${text}. Payload: [form data]`, true);
+        throw new Error("OpenAI API error (" + res.status + "): " + text);
+      }
+      return await res.json();
+    } catch (err) {
+      logLine(`OpenAI form-data request failed for POST ${url}. Payload: [form data]. Error: ${err.message}`, true);
+      throw err;
     }
-    return await res.json();
   }
 
   async function openaiAudio(path, body, label = null) {
@@ -2915,17 +2962,24 @@
       "Content-Type": "application/json",
     };
     const requestLabel = label || `OpenAI audio POST ${path}`;
-    const res = await fetchWithTimeout("https://api.openai.com/v1" + path, {
-      method: "POST",
-      headers: headers,
-      body: JSON.stringify(body),
-    }, requestLabel);
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error("OpenAI Audio API error (" + res.status + "): " + text);
+    const url = "https://api.openai.com/v1" + path;
+    try {
+      const res = await fetchWithTimeout(url, {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify(body),
+      }, requestLabel);
+      if (!res.ok) {
+        const text = await res.text();
+        logLine(`OpenAI audio error ${res.status} for POST ${url}: ${text}. Payload: ${JSON.stringify(body)}`, true);
+        throw new Error("OpenAI Audio API error (" + res.status + "): " + text);
+      }
+      // Expect binary audio
+      return await res.blob();
+    } catch (err) {
+      logLine(`OpenAI audio request failed for POST ${url}. Payload: ${JSON.stringify(body)}. Error: ${err.message}`, true);
+      throw err;
     }
-    // Expect binary audio
-    return await res.blob();
   }
 
   async function fetchOpenAIVoices(force = false) {
@@ -3410,7 +3464,16 @@ When asked about photos:
 
   async function runProjectAssistant(project, roleName, userText) {
     if (!project.assistants || !project.assistants[roleName]) {
-      logLine("Assistant '" + roleName + "' not found. Initialize first.", true);
+      logLine("Assistant '" + roleName + "' not found. Initializing before use...", true);
+      try {
+        await initAssistantsForProject(project);
+      } catch (e) {
+        logLine(`Assistant initialization failed: ${e.message}`, true);
+        return "";
+      }
+    }
+    if (!project.assistants || !project.assistants[roleName]) {
+      logLine("Assistant still unavailable after initialization.", true);
       return "";
     }
     setStatus("Running assistant: " + roleName);
@@ -5332,6 +5395,11 @@ Please:
   async function pushDriveFileToVectorStore(project, category, driveFile) {
     const content = await downloadDriveFile(driveFile.id);
     const vsId = await ensureVectorStore(project, category);
+    try {
+      await initAssistantsForProject(project);
+    } catch (e) {
+      logLine(`Assistant init while uploading to vector store failed: ${e.message}`, true);
+    }
     const fileObj = new File([content.blob], driveFile.name, { type: content.blob.type || "application/octet-stream" });
     const uploadRes = await uploadFileToOpenAI(fileObj);
     await attachFileToVectorStore(vsId, uploadRes.id);
@@ -5708,10 +5776,10 @@ Please:
   function supportsInlineDocPreview(doc) {
     const mime = (doc.mimeType || "").toLowerCase();
     const name = (doc.baseName || doc.filename || "").toLowerCase();
-    if (mime.startsWith("image/") || mime.startsWith("audio/") || mime.startsWith("text/")) return true;
-    if (mime.includes("json") || mime.includes("yaml") || mime.includes("xml") || mime.includes("csv")) return true;
+    if (mime.startsWith("image/")) return true;
+    const isTextLike = mime.startsWith("text/") || mime.includes("json") || mime.includes("yaml") || mime.includes("xml") || mime.includes("csv");
+    if (isTextLike) return true;
     if (/\.(json|ya?ml|xml|csv|txt|md)$/i.test(name)) return true;
-    if (/\.mp3$/i.test(name)) return true;
     return false;
   }
 
@@ -5770,6 +5838,7 @@ Please:
           .attr("title", "Open in Google Drive")
           .text("↗️");
         $openDrive.on("click", () => {
+          requestDriveReturnResyncPrompt();
           window.open(driveUrl, "_blank", "noopener");
         });
         $actions.append($openDrive);
@@ -5977,7 +6046,7 @@ Please:
     setCharacterMode(characterConversationMode);
     collapseAllMenuPanels();
 
-    const handleReturnToPage = () => scheduleReturnPrompt();
+    const handleReturnToPage = () => scheduleReturnPrompt(driveReturnPromptRequested);
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) handleReturnToPage();
     });
