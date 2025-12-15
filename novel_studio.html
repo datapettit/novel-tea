@@ -940,6 +940,11 @@
       gap: 10px;
     }
 
+    #project-picker-card .field-label {
+      font-size: 12px;
+      color: #c5c6c7;
+    }
+
     #project-picker-card h3 {
       margin: 0;
       color: #66fcf1;
@@ -968,6 +973,22 @@
       background: #0f141c;
     }
 
+    .project-picker-row.project-picker-new {
+      border-style: dashed;
+      background: #0e131a;
+    }
+
+    .project-picker-row .picker-row-label {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .project-picker-row .picker-row-label small {
+      color: #c5c6c7;
+      font-size: 11px;
+    }
+
     .project-picker-row.selected {
       border-color: #45a29e;
       background: #111a22;
@@ -983,6 +1004,69 @@
     #project-picker-status {
       font-size: 12px;
       color: #c5c6c7;
+    }
+
+    #picker-new-name-row {
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 0 2px 0;
+    }
+
+    #picker-new-name-row.visible {
+      display: flex;
+    }
+
+    #picker-primary-action-btn {
+      flex: 1;
+    }
+
+    #story-loading-overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 60;
+      backdrop-filter: blur(1px);
+    }
+
+    #story-loading-overlay.visible {
+      display: flex;
+    }
+
+    #story-loading-modal {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 18px 22px;
+      background: #0d1117;
+      border: 1px solid #1f2833;
+      border-radius: 8px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+      color: #e5e5e5;
+    }
+
+    .story-loading-spinner {
+      width: 46px;
+      height: 46px;
+      border: 5px solid #1f2833;
+      border-top-color: #66fcf1;
+      border-radius: 50%;
+      animation: spin 0.85s linear infinite;
+    }
+
+    body.story-loading-active #app {
+      pointer-events: none;
+      user-select: none;
+      filter: blur(2px);
+    }
+
+    body.story-loading-active #console-panel {
+      pointer-events: auto;
+      filter: none;
     }
     #app.locked {
       filter: blur(1px);
@@ -1024,15 +1108,13 @@
     </p>
     <div id="project-picker-status">Loading Drive projects...</div>
     <div id="project-picker-list"></div>
-    <div class="project-picker-actions">
-      <input type="text" id="picker-new-project-input" placeholder="New project name (without 'novel -')" />
-      <button id="picker-create-project-btn">Create & Use</button>
+    <div id="picker-new-name-row">
+      <div class="field-label">Name your new story (without the "novel -" prefix)</div>
+      <input type="text" id="picker-new-project-input" placeholder="e.g., The Sapphire Isles" />
     </div>
-    <div class="project-picker-actions" style="justify-content: space-between;">
-      <div style="display:flex;gap:6px;align-items:center;">
-        <button id="picker-refresh-btn" class="small">Refresh list</button>
-        <button id="picker-use-selected-btn">Use Selected</button>
-      </div>
+    <div class="project-picker-actions" style="justify-content: space-between;align-items:center;gap:10px;">
+      <button id="picker-refresh-btn" class="small">Refresh list</button>
+      <button id="picker-primary-action-btn">Load Story</button>
       <button id="picker-cancel-btn" class="small" style="background:#444;color:#e5e5e5;">Exit picker</button>
     </div>
   </div>
@@ -1040,6 +1122,13 @@
 <div id="loading-indicator">
   <div class="loading-spinner"></div>
   <div class="loading-text">Working...</div>
+</div>
+<div id="story-loading-overlay">
+  <div id="story-loading-modal">
+    <div class="story-loading-spinner"></div>
+    <div id="story-loading-message">Loading story...</div>
+    <div style="font-size:12px;color:#c5c6c7;text-align:center;">Syncing Drive documents to keep assistants current.</div>
+  </div>
 </div>
 <div id="app" class="locked">
   <div id="sidebar">
@@ -1385,7 +1474,9 @@
     "drafts",
     "audio",
   ];
+  const STORY_SYNC_CATEGORIES = ["storyline", "outlines", "relationships", "history"];
   const CHARACTER_CATEGORY = "characters";
+  const NEW_PROJECT_SENTINEL = "__new_story_project__";
   const DEFAULT_TTS_MODEL = "tts-1";
   const TTS_MODELS = ["tts-1", "tts-1-hd"];
   const FALLBACK_VOICES = ["alloy", "ash", "coral", "echo", "shimmer", "verse"];
@@ -2061,6 +2152,28 @@
     updateLoadingIndicator();
   }
 
+  function showStoryLoadingModal(message = "Loading story...") {
+    $("#story-loading-message").text(message || "Loading story...");
+    $("#story-loading-overlay").addClass("visible");
+    document.body.classList.add("story-loading-active");
+  }
+
+  function hideStoryLoadingModal() {
+    $("#story-loading-overlay").removeClass("visible");
+    document.body.classList.remove("story-loading-active");
+  }
+
+  async function withStoryLoading(message, task) {
+    showStoryLoadingModal(message);
+    beginLongLoading();
+    try {
+      return await task();
+    } finally {
+      endLongLoading();
+      hideStoryLoadingModal();
+    }
+  }
+
   function setStatus(message) {
     $("#status-bar").text(message);
   }
@@ -2297,47 +2410,82 @@
     }
   }
 
+  function updateProjectPickerPrimaryAction() {
+    const isNew = projectPickerSelection === NEW_PROJECT_SENTINEL;
+    $("#picker-new-name-row").toggleClass("visible", isNew);
+    $("#picker-primary-action-btn").text(isNew ? "Create Story" : "Load Story");
+  }
+
+  function handlePickerSelectionChange(name) {
+    projectPickerSelection = name;
+    $("#project-picker-list .project-picker-row").removeClass("selected");
+    $("#project-picker-list input[name='project-picker-choice']").prop("checked", false);
+    $("#project-picker-list .project-picker-row").each(function () {
+      if ($(this).data("projectName") === name) {
+        $(this).addClass("selected");
+        $(this).find("input[name='project-picker-choice']").prop("checked", true);
+      }
+    });
+    updateProjectPickerPrimaryAction();
+  }
+
   function renderProjectPickerRows(folders = [], preferred = null) {
     const $list = $("#project-picker-list");
     $list.empty();
+    const normalizedPref = preferred ? preferred.toLowerCase() : null;
+    let nextSelection = preferred || projectPickerSelection || null;
+
     if (!folders.length) {
       $list.append(
         $("<div>")
           .addClass("project-picker-row")
           .text("No Google Drive folders found that begin with 'novel - '. Create one to continue.")
       );
-      projectPickerSelection = null;
-      return;
     }
 
-    const normalizedPref = preferred ? preferred.toLowerCase() : null;
     folders.forEach((folder) => {
       const name = folder.name.replace(PROJECT_PREFIX, "").trim();
-      const $row = $("<div>").addClass("project-picker-row");
+      const $row = $("<div>").addClass("project-picker-row").data("projectName", name);
       const $label = $("<div>")
-        .css({ display: "flex", flexDirection: "column" })
+        .addClass("picker-row-label")
         .append($("<strong>").text(folder.name))
-        .append($("<span>").css("color", "#c5c6c7").text(folder.id));
+        .append($("<small>").text(folder.id));
       const $radio = $("<input type='radio' name='project-picker-choice'>").val(name);
       if (normalizedPref && name.toLowerCase() === normalizedPref) {
-        $radio.prop("checked", true);
-        $row.addClass("selected");
-        projectPickerSelection = name;
+        nextSelection = name;
       }
       $radio.on("change", function () {
-        projectPickerSelection = $(this).val();
-        $(".project-picker-row").removeClass("selected");
-        $row.addClass("selected");
+        handlePickerSelectionChange($(this).val());
       });
       $row.append($label, $radio);
       $list.append($row);
     });
 
-    if (!projectPickerSelection && folders.length) {
-      projectPickerSelection = folders[0].name.replace(PROJECT_PREFIX, "").trim();
-      $list.find("input[name='project-picker-choice']").first().prop("checked", true);
-      $list.find(".project-picker-row").first().addClass("selected");
+    const $newRow = $("<div>")
+      .addClass("project-picker-row project-picker-new")
+      .data("projectName", NEW_PROJECT_SENTINEL);
+    const $newLabel = $("<div>")
+      .addClass("picker-row-label")
+      .append($("<strong>").text("NEW +"))
+      .append($("<small>").text("Start a fresh story in Drive"));
+    const $newRadio = $("<input type='radio' name='project-picker-choice'>").val(NEW_PROJECT_SENTINEL);
+    $newRadio.on("change", function () {
+      handlePickerSelectionChange(NEW_PROJECT_SENTINEL);
+    });
+    $newRow.append($newLabel, $newRadio);
+    $list.append($newRow);
+
+    if (!nextSelection) {
+      if (normalizedPref) {
+        nextSelection = preferred;
+      } else if (folders.length) {
+        nextSelection = folders[0].name.replace(PROJECT_PREFIX, "").trim();
+      } else {
+        nextSelection = NEW_PROJECT_SENTINEL;
+      }
     }
+
+    handlePickerSelectionChange(nextSelection);
   }
 
   async function refreshProjectPicker(preferred = null) {
@@ -2345,7 +2493,7 @@
       setProjectPickerStatus("Loading Drive projects...");
       const folders = await syncProjectsFromDrive();
       const sorted = (folders || []).sort((a, b) => a.name.localeCompare(b.name));
-      renderProjectPickerRows(sorted, preferred);
+      renderProjectPickerRows(sorted, preferred || projectPickerSelection || null);
       setProjectPickerStatus("Select a Drive project to use as your workspace.");
     } catch (e) {
       setProjectPickerStatus("Failed to load Drive projects: " + e.message);
@@ -2356,6 +2504,7 @@
   function showProjectPicker(preferred = null) {
     return new Promise((resolve) => {
       projectPickerResolver = resolve;
+      projectPickerSelection = preferred || projectPickerSelection || null;
       $("#project-picker-overlay").addClass("visible");
       refreshProjectPicker(preferred);
     });
@@ -4300,20 +4449,39 @@ Return the full updated sheet text only.
     return record;
   }
 
+  async function syncStoryAssistants(project) {
+    if (!project) return;
+    const priorCategory = $("#doc-category-select").val();
+    for (const category of STORY_SYNC_CATEGORIES) {
+      try {
+        await resyncCategoryFromDrive(project, category);
+      } catch (e) {
+        logLine(`Unable to refresh ${category} for assistants: ${e.message}`, true);
+      }
+    }
+    if (priorCategory) {
+      $("#doc-category-select").val(priorCategory);
+      await renderDocExplorer(project, priorCategory);
+    }
+  }
+
   async function openStoryCanvas(project, preferReload = false) {
     if (!project) return;
-    hideDocCanvas();
-    hideCharacterCanvas();
-    $("#story-canvas").addClass("visible");
-    setStoryCanvasMode(storyConversationMode);
-    const text = preferReload ? await loadStoryArc(project, true) : await loadStoryArc(project);
-    const fallback =
-      "Story arc canvas is empty. Generate or paste an arc here. Keep it plain text with a TLDR Story Arc section at the bottom.";
-    setStoryCanvasText(text || fallback);
-    currentStoryArc = getStoryArcRecord(project);
-    if (!text) {
-      pushStoryMessage("system", "No saved story arc found yet. Create one to begin.");
-    }
+    await withStoryLoading(preferReload ? "Reloading story..." : "Loading story...", async () => {
+      await syncStoryAssistants(project);
+      hideDocCanvas();
+      hideCharacterCanvas();
+      $("#story-canvas").addClass("visible");
+      setStoryCanvasMode(storyConversationMode);
+      const text = preferReload ? await loadStoryArc(project, true) : await loadStoryArc(project);
+      const fallback =
+        "Story arc canvas is empty. Generate or paste an arc here. Keep it plain text with a TLDR Story Arc section at the bottom.";
+      setStoryCanvasText(text || fallback);
+      currentStoryArc = getStoryArcRecord(project);
+      if (!text) {
+        pushStoryMessage("system", "No saved story arc found yet. Create one to begin.");
+      }
+    });
   }
 
   async function sendStoryCanvasPrompt(project) {
@@ -4352,9 +4520,12 @@ Return the full updated sheet text only.
   }
 
   async function refreshStoryArcFromDrive(project) {
-    const text = await loadStoryArc(project, true);
-    setStoryCanvasText(text);
-    pushStoryMessage("system", "Reloaded story arc from Drive.");
+    await withStoryLoading("Reloading story and syncing assistants...", async () => {
+      await syncStoryAssistants(project);
+      const text = await loadStoryArc(project, true);
+      setStoryCanvasText(text);
+      pushStoryMessage("system", "Reloaded story arc from Drive.");
+    });
   }
 
   // ==============================
@@ -5888,9 +6059,17 @@ Please:
       refreshProjectPicker(projectPickerSelection || currentProjectName || null);
     });
 
-    $("#picker-use-selected-btn").on("click", function () {
+    $("#picker-primary-action-btn").on("click", async function () {
       if (!projectPickerSelection) {
         alert("Select a Drive project first.");
+        return;
+      }
+      if (projectPickerSelection === NEW_PROJECT_SENTINEL) {
+        const created = await createProject($("#picker-new-project-input").val());
+        if (created) {
+          $("#picker-new-project-input").val("");
+          hideProjectPicker(created);
+        }
         return;
       }
       hideProjectPicker(projectPickerSelection);
@@ -5898,14 +6077,6 @@ Please:
 
     $("#picker-cancel-btn").on("click", function () {
       hideProjectPicker(null);
-    });
-
-    $("#picker-create-project-btn").on("click", async function () {
-      const created = await createProject($("#picker-new-project-input").val());
-      if (created) {
-        $("#picker-new-project-input").val("");
-        hideProjectPicker(created);
-      }
     });
 
     $("#image-viewer-close").on("click", hideImageModal);
