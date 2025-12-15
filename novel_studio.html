@@ -2922,7 +2922,8 @@
       return await res.json();
     } catch (err) {
       const payload = body ? JSON.stringify(body) : "(no payload)";
-      logLine(`OpenAI request failed for ${method} ${url}. Payload: ${payload}. Error: ${err.message}`, true);
+      const context = label ? ` [${label}]` : "";
+      logLine(`OpenAI request failed${context} for ${method} ${url}. Payload: ${payload}. Error: ${err.message}`, true);
       throw err;
     }
   }
@@ -3206,16 +3207,34 @@
 
   async function ensureVectorStore(project, category) {
     project.vectorStores = project.vectorStores || {};
-    if (project.vectorStores[category]) return project.vectorStores[category];
+    if (project.vectorStores[category]) {
+      logLine(`Using cached vector store for '${category}': ${project.vectorStores[category]}`);
+      return project.vectorStores[category];
+    }
 
-    const res = await openaiJson("/vector_stores", "POST", {
-      name: project.name + " [" + category + "]",
-    }, true);
-    const vsId = res.id;
-    project.vectorStores[category] = vsId;
-    logLine("Created vector store for '" + category + "': " + vsId);
-    saveProjectsToStorage();
-    return vsId;
+    const label = `vector store create ${project.name}/${category}`;
+    try {
+      const res = await openaiJson(
+        "/vector_stores",
+        "POST",
+        {
+          name: project.name + " [" + category + "]",
+        },
+        true,
+        label
+      );
+      const vsId = res.id;
+      project.vectorStores[category] = vsId;
+      logLine("Created vector store for '" + category + "': " + vsId);
+      saveProjectsToStorage();
+      return vsId;
+    } catch (e) {
+      logLine(
+        `Failed to ensure vector store for '${category}' in project '${project.name}': ${e.message}`,
+        true
+      );
+      throw e;
+    }
   }
 
   async function uploadFileToOpenAI(file) {
@@ -3449,14 +3468,23 @@ When asked about photos:
 
     project.vectorStores = project.vectorStores || {};
 
-    await createOrGetAssistant(project, "LoreKeeper", loreInstructions, true);
-    await createOrGetAssistant(project, "SeriesArchitect", architectInstructions, true);
-    await createOrGetAssistant(project, "BookOutliner", outlinerInstructions, true);
-    await createOrGetAssistant(project, "ChapterDrafter", drafterInstructions, true);
-    await createOrGetAssistant(project, "LineEditor", lineEditorInstructions, false);
-    await createOrGetAssistant(project, "ContinuityEditor", continuityInstructions, true);
-    await createOrGetAssistant(project, "BookReviewer", bookReviewerInstructions, true);
-    await createOrGetAssistant(project, "CharacterDesigner", characterDesignerInstructions, true);
+    const safeCreate = async (name, instructions, useFileSearch) => {
+      try {
+        await createOrGetAssistant(project, name, instructions, useFileSearch);
+      } catch (e) {
+        logLine(`Failed to initialize assistant '${name}': ${e.message}`, true);
+        throw e;
+      }
+    };
+
+    await safeCreate("LoreKeeper", loreInstructions, true);
+    await safeCreate("SeriesArchitect", architectInstructions, true);
+    await safeCreate("BookOutliner", outlinerInstructions, true);
+    await safeCreate("ChapterDrafter", drafterInstructions, true);
+    await safeCreate("LineEditor", lineEditorInstructions, false);
+    await safeCreate("ContinuityEditor", continuityInstructions, true);
+    await safeCreate("BookReviewer", bookReviewerInstructions, true);
+    await safeCreate("CharacterDesigner", characterDesignerInstructions, true);
 
     setStatus("Assistants initialized.");
     logLine("Assistants initialized.");
@@ -3464,7 +3492,11 @@ When asked about photos:
 
   async function runProjectAssistant(project, roleName, userText) {
     if (!project.assistants || !project.assistants[roleName]) {
-      logLine("Assistant '" + roleName + "' not found. Initializing before use...", true);
+      const existingAssistants = Object.keys(project.assistants || {}).join(", ") || "(none)";
+      logLine(
+        `Assistant '${roleName}' not found for project '${project.name}'. Existing: ${existingAssistants}. Initializing before use...`,
+        true
+      );
       try {
         await initAssistantsForProject(project);
       } catch (e) {
@@ -3603,6 +3635,16 @@ When asked about photos:
     return (match[1] || "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
   }
 
+  function filenameLooksLikeProfileImage(name) {
+    if (!name) return false;
+    return /profile\.(jpg|jpeg|png)$/i.test(name.trim());
+  }
+
+  function isImageMimeType(mimeType, filename = "") {
+    if ((mimeType || "").startsWith("image/")) return true;
+    return /\.(jpg|jpeg|png|gif|webp)$/i.test(filename || "");
+  }
+
   function renderCharacterRoster(project, roster) {
     const $grid = $("#character-grid");
     $grid.empty();
@@ -3644,67 +3686,48 @@ When asked about photos:
     highlightSelectedCharacterCard();
   }
 
+  async function listCharacterFolders(project) {
+    const parentId = await ensureCategoryFolder(project, CHARACTER_CATEGORY);
+    const files = await listDriveFiles(parentId);
+    return files.filter((f) => f.mimeType === "application/vnd.google-apps.folder");
+  }
+
   async function refreshCharacterRoster(project, silent = false) {
-    const docs = await fetchCategoryDocuments(project, CHARACTER_CATEGORY);
-    await warmImageCacheForDocs(docs);
-    const rosterNames = new Set();
-    for (const doc of docs) {
-      const nameCandidates = new Set();
-      const baseName = doc.baseName || doc.filename || "";
+    const folders = await listCharacterFolders(project);
+    const roster = [];
 
-      const derivedFromFolder = normalizeCharacterName(doc.characterName);
-      if (derivedFromFolder) nameCandidates.add(derivedFromFolder);
+    for (const folder of folders) {
+      const name = normalizeCharacterName(folder.name) || folder.name;
+      const record = ensureCharacterRecord(project, name);
+      roster.push({ name });
 
-      const sheetName = deriveCharacterNameFromFilename(baseName);
-      if (sheetName) nameCandidates.add(sheetName);
-
-      const profileDocName = deriveCharacterNameFromProfileDoc(baseName);
-      if (profileDocName) nameCandidates.add(profileDocName);
-
-      const profileName = deriveProfileName(baseName);
-      if (profileName) nameCandidates.add(profileName);
-
-      nameCandidates.forEach((name) => {
-        rosterNames.add(name);
-
-        const record = ensureCharacterRecord(project, name);
-        if (sheetName === name) {
-          record.sheet = record.sheet || {};
-          record.sheet.filename = record.sheet.filename || doc.filename;
-          record.sheet.driveId = record.sheet.driveId || doc.id;
-          record.sheet.fileId = record.sheet.fileId || doc.mappedFileId || null;
-          record.sheet.ext = record.sheet.ext || (baseName.split(".").pop() || "txt").toLowerCase();
-        }
-      });
-
-      if (profileName) {
-        const profileRecord = ensureCharacterRecord(project, profileName);
-        const existingProfile = (profileRecord.photos || []).find((p) => p.type === "profile");
-        if (!existingProfile) {
-          try {
-            const content = await downloadDriveFile(doc.id);
-            profileRecord.photos = profileRecord.photos || [];
-            profileRecord.photos.unshift({
-              driveId: doc.id,
-              fileId: doc.mappedFileId || null,
-              filename: doc.filename,
+      try {
+        const files = await listDriveFiles(folder.id);
+        const profileFile = files.find((f) => f.mimeType !== "application/vnd.google-apps.folder" && filenameLooksLikeProfileImage(f.name));
+        if (profileFile) {
+          const exists = (record.photos || []).find((p) => p.driveId === profileFile.id && p.type === "profile");
+          if (!exists) {
+            const content = await downloadDriveFile(profileFile.id);
+            record.photos = record.photos || [];
+            record.photos.unshift({
+              driveId: profileFile.id,
+              fileId: project.driveMappings?.[CHARACTER_CATEGORY]?.[profileFile.id] || null,
+              filename: profileFile.name,
               type: "profile",
               dataUrl: content.type === "image" ? content.data : null,
             });
-          } catch (e) {
-            logLine(`Unable to cache profile photo ${doc.filename}: ${e.message}`, true);
           }
         }
+      } catch (e) {
+        logLine(`Unable to inspect folder ${folder.name}: ${e.message}`, true);
       }
     }
-
-    const roster = Array.from(rosterNames).map((name) => ({ name }));
 
     renderCharacterRoster(project, roster);
     saveProjectsToStorage();
     refreshCharacterSelectUI(project);
     if (!silent) {
-      logLine(`Character roster refreshed from file names (${roster.length} found).`);
+      logLine(`Character roster refreshed from character folders (${roster.length} found).`);
     }
     return roster;
   }
@@ -3720,63 +3743,72 @@ When asked about photos:
   }
 
   async function loadCharacterAssets(project, name) {
-    const docs = await fetchCategoryDocuments(project, CHARACTER_CATEGORY);
-    const matches = docs.filter((d) => (d.filename || "").toLowerCase().includes(name.toLowerCase()));
-
     const record = ensureCharacterRecord(project, name);
-    for (const match of matches) {
-      try {
-        if (/character\s*sheet/i.test(match.filename) && !record?.sheet?.text) {
-          const content = await downloadDriveFile(match.id);
+    const characterRootId = project.drive.characterFolders?.[name] || (await ensureCharacterFolder(project, name));
+    const files = await listDriveFiles(characterRootId);
+    const nextPhotos = [];
+    const loadedEntries = [];
+
+    for (const file of files) {
+      if (file.mimeType === "application/vnd.google-apps.folder") continue;
+
+      if (/character\s*sheet/i.test(file.name) && !record?.sheet?.text) {
+        try {
+          const content = await downloadDriveFile(file.id);
           if (content.type === "text") {
-            const ext = (match.filename.split(".").pop() || "txt").toLowerCase();
+            const ext = (file.name.split(".").pop() || "txt").toLowerCase();
             record.sheet = {
               ...(record.sheet || {}),
               text: content.data,
-              driveId: match.id,
-              fileId: match.mappedFileId || null,
-              filename: match.filename,
+              driveId: file.id,
+              fileId: project.driveMappings?.[CHARACTER_CATEGORY]?.[file.id] || null,
+              filename: file.name,
               ext,
             };
+            loadedEntries.push(file);
           }
+        } catch (e) {
+          logLine(`Unable to load attachment ${file.name}: ${e.message}`, true);
         }
-        if (/profile\.(jpg|jpeg|png)$/i.test(match.filename)) {
-          const hasProfile = (record?.photos || []).some((p) => p.type === "profile");
-          if (!hasProfile) {
-            const content = await downloadDriveFile(match.id);
-            if (content.type === "image") {
-              record.photos = record.photos || [];
-              record.photos.unshift({
-                driveId: match.id,
-                fileId: match.mappedFileId || null,
-                filename: match.filename,
-                type: "profile",
-                dataUrl: content.data,
-              });
-            }
+      }
+
+      if (isImageMimeType(file.mimeType, file.name)) {
+        try {
+          const content = await downloadDriveFile(file.id);
+          const type = filenameLooksLikeProfileImage(file.name) ? "profile" : "gallery";
+          const entry = {
+            driveId: file.id,
+            fileId: project.driveMappings?.[CHARACTER_CATEGORY]?.[file.id] || null,
+            filename: file.name,
+            type,
+            dataUrl: content.type === "image" ? content.data : null,
+          };
+          if (type === "profile") {
+            nextPhotos.unshift(entry);
+          } else {
+            nextPhotos.push(entry);
           }
+          loadedEntries.push(file);
+        } catch (e) {
+          logLine(`Unable to load attachment ${file.name}: ${e.message}`, true);
         }
-      } catch (e) {
-        logLine(`Unable to load attachment ${match.filename}: ${e.message}`, true);
       }
     }
 
     try {
-      const characterRootId = project.drive.characterFolders?.[name] || (await ensureCharacterFolder(project, name));
       const draftsFolder = await findChildFolder(characterRootId, "drafts");
+      const draftPhotos = [];
       if (draftsFolder) {
         const draftFiles = await listDriveFiles(draftsFolder.id);
-        record.draftPhotos = record.draftPhotos || [];
         for (const draft of draftFiles) {
           if (draft.mimeType === "application/vnd.google-apps.folder") continue;
-          const exists = record.draftPhotos.some((p) => p.driveId === draft.id);
-          if (exists) continue;
+          if (!isImageMimeType(draft.mimeType, draft.name)) continue;
           try {
             const content = await downloadDriveFile(draft.id);
-            record.draftPhotos.push({
+            draftPhotos.push({
               driveId: draft.id,
               filename: draft.name,
-              type: /profile/i.test(draft.name) ? "profile-draft" : "gallery-draft",
+              type: filenameLooksLikeProfileImage(draft.name) ? "profile-draft" : "gallery-draft",
               dataUrl: content.type === "image" ? content.data : null,
             });
           } catch (inner) {
@@ -3784,12 +3816,14 @@ When asked about photos:
           }
         }
       }
+      record.draftPhotos = draftPhotos;
     } catch (e) {
       logLine(`Unable to load draft assets for ${name}: ${e.message}`, true);
     }
 
+    record.photos = nextPhotos;
     saveProjectsToStorage();
-    return matches;
+    return loadedEntries;
   }
 
   function getCanvasText() {
@@ -5461,7 +5495,13 @@ Please:
 
   async function reconcileVectorStoreCategory(project, category) {
     if (category === "drafts") return; // drafts stay out of vector stores
-    const vsId = await ensureVectorStore(project, category);
+    let vsId = null;
+    try {
+      vsId = await ensureVectorStore(project, category);
+    } catch (e) {
+      logLine(`Skipping vector sync for ${category}; no vector store available. ${e.message}`, true);
+      return;
+    }
 
     let vsEntries = [];
     try {
@@ -5517,6 +5557,7 @@ Please:
     try {
       for (const category of CATEGORY_FOLDERS) {
         try {
+          logLine(`Aligning vector store for category '${category}'...`);
           await reconcileVectorStoreCategory(project, category);
         } catch (e) {
           logLine(`Vector alignment for ${category} failed: ${e.message}`, true);
