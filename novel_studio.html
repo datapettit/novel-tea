@@ -1282,12 +1282,11 @@
         </div>
         <div class="menu-subgroup">
           <div class="menu-subtitle">Outlines</div>
-          <button id="build-trilogy-outline-btn">Build Storyline Outline (JSON)</button>
-          <button id="build-book-outline-btn">Build Book Outline (JSON)</button>
+          <button id="build-trilogy-outline-btn">Build Storyline Outline</button>
         </div>
         <div class="menu-subgroup">
-          <div class="menu-subtitle">Story Arc Canvas</div>
-          <button id="open-story-canvas-btn">Open Story Arc Canvas</button>
+          <div class="menu-subtitle">Story Discussion</div>
+          <button id="open-story-canvas-btn">Discuss the Story</button>
         </div>
         <div class="menu-subgroup">
           <div class="menu-subtitle">Chapters</div>
@@ -1348,25 +1347,19 @@
     </div>
     <div id="story-canvas">
       <div id="story-canvas-header">
-        <div class="title">Story Arc Canvas</div>
-        <div class="mode-toggle" id="story-mode-toggle">
-          <button data-mode="edit" class="active">Edit Arc</button>
-          <button data-mode="qa">Ask Questions</button>
-        </div>
+        <div class="title">Story Discussion</div>
         <div id="story-canvas-actions">
-          <button id="story-save-btn">Save Story Arc</button>
-          <button id="story-refresh-btn" class="small">Reload</button>
+          <button id="story-refresh-btn" class="small">Refresh Sources</button>
         </div>
       </div>
       <div
         id="story-canvas-document"
-        contenteditable="true"
-        aria-label="Story arc canvas"
+        aria-label="Story discussion context"
         style="flex:1;overflow:auto;border:1px solid #1f2833;padding:8px;border-radius:4px;background:#0d1117;"
       ></div>
       <div id="story-chat-log"></div>
       <div id="story-input-row">
-        <input type="text" id="story-user-prompt" placeholder="Enter an edit request or a question" />
+        <input type="text" id="story-user-prompt" placeholder="Discuss chapters, scenes, or characters" />
         <button id="story-send-btn">Send to Assistant</button>
       </div>
     </div>
@@ -1547,8 +1540,7 @@
   let currentProjectName = null;
   let assistantModel = ASSISTANT_MODELS[0];
   let currentCharacterName = null;
-  let storyConversationMode = "edit";
-  let currentStoryArc = null;
+  let storyDiscussionState = null; // { assistantId, vectorStoreId, sourcesSummary, messages }
   let consoleExpanded = false;
   let docEditorState = null;
   let characterConversationMode = "edit";
@@ -3547,6 +3539,87 @@
     }
   }
 
+  async function runAssistantWithMessages(assistantId, messages) {
+    const normalized = (messages || [])
+      .filter((m) => m && typeof m.content === "string" && m.content.trim().length)
+      .map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content.trim() }));
+    if (!normalized.length) {
+      throw new Error("No messages provided for assistant run.");
+    }
+
+    beginLongLoading();
+    try {
+      logLine("Preparing threaded assistant run " + assistantId + " with conversation history...");
+      const body = {
+        assistant_id: assistantId,
+        thread: {
+          messages: normalized,
+        },
+      };
+      const runObj = await openaiJson("/threads/runs", "POST", body, true, `assistant run ${assistantId}`);
+      const threadId = runObj.thread_id;
+      const runId = runObj.id;
+
+      const waitInterval = setInterval(() => logLine(`Waiting on assistant ${assistantId}...`), 15000);
+      const waitTimeout = setTimeout(() => {
+        logLine(`Assistant ${assistantId} run exceeded 5 minutes; aborting.`, true);
+      }, 300000);
+
+      let attempts = 0;
+      while (true) {
+        attempts++;
+        const run = await openaiJson(
+          `/threads/${threadId}/runs/${runId}`,
+          "GET",
+          null,
+          true,
+          `assistant status ${assistantId}`
+        );
+        if (run.status === "completed") {
+          break;
+        }
+        if (["failed", "cancelled", "expired"].includes(run.status)) {
+          clearInterval(waitInterval);
+          clearTimeout(waitTimeout);
+          throw new Error("Run ended with status: " + run.status);
+        }
+        if (attempts > 60) {
+          clearInterval(waitInterval);
+          clearTimeout(waitTimeout);
+          throw new Error("Run polling timed out.");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      clearInterval(waitInterval);
+      clearTimeout(waitTimeout);
+      const msgs = await openaiJson(
+        `/threads/${threadId}/messages?limit=20`,
+        "GET",
+        null,
+        true,
+        `assistant messages ${assistantId}`
+      );
+      if (!msgs.data || msgs.data.length === 0) {
+        return "";
+      }
+      for (const msg of msgs.data) {
+        if (msg.role === "assistant") {
+          let textParts = [];
+          for (const c of msg.content || []) {
+            if (c.type === "text" && c.text && c.text.value) {
+              textParts.push(c.text.value);
+            }
+          }
+          return textParts.join("\n").trim();
+        }
+      }
+      return "";
+    } finally {
+      endLongLoading();
+    }
+  }
+
   // ==============================
   // OPENAI RESOURCES (ASSISTANTS, VECTOR STORES, FILES)
   // ==============================
@@ -4818,33 +4891,17 @@ Return the full updated sheet text only.
   }
 
   // ==============================
-  // STORY ARC CANVAS
+  // STORY DISCUSSION
   // ==============================
 
-  function getStoryArcRecord(project) {
-    ensureProjectStructure(project);
-    project.storyArc = project.storyArc || { filename: "story_arc.txt" };
-    project.storyArc.filename = project.storyArc.filename || "story_arc.txt";
-    return project.storyArc;
+  function resetStoryDiscussionUI(summaryText = "") {
+    $("#story-chat-log").empty();
+    $("#story-user-prompt").val("");
+    setStoryDiscussionSummary(summaryText);
   }
 
-  function setStoryCanvasMode(mode) {
-    storyConversationMode = mode === "qa" ? "qa" : "edit";
-    $("#story-mode-toggle button").removeClass("active");
-    $(`#story-mode-toggle button[data-mode='${storyConversationMode}']`).addClass("active");
-    const placeholder =
-      storyConversationMode === "edit"
-        ? "Ask for revisions to the story arc..."
-        : "Ask questions about the arc and get answers from context...";
-    $("#story-user-prompt").attr("placeholder", placeholder);
-  }
-
-  function setStoryCanvasText(text) {
-    $("#story-canvas-document").text(text || "");
-  }
-
-  function getStoryCanvasText() {
-    return ($("#story-canvas-document").text() || "").trim();
+  function setStoryDiscussionSummary(text) {
+    $("#story-canvas-document").text(text || "Story discussion context has not been prepared yet.");
   }
 
   function pushStoryMessage(role, text) {
@@ -4855,120 +4912,194 @@ Return the full updated sheet text only.
     $("#story-chat-log").scrollTop($("#story-chat-log")[0].scrollHeight);
   }
 
-  async function loadStoryArc(project, forceReload = false) {
-    const record = getStoryArcRecord(project);
-    if (forceReload) {
-      record.text = null;
-    }
-    if (record.driveId && !record.text) {
-      try {
-        const dl = await downloadDriveFile(record.driveId);
-        if (dl?.type === "text") {
-          record.text = dl.data;
-        }
-      } catch (e) {
-        logLine("Failed to load story arc from Drive: " + e.message, true);
+  function sortStoryDocs(docs) {
+    return [...docs].sort((a, b) => {
+      const aKey = (a.baseName || a.filename || "").toLowerCase();
+      const bKey = (b.baseName || b.filename || "").toLowerCase();
+      if (aKey === bKey) {
+        const aTime = a.modifiedAt ? a.modifiedAt.getTime() : 0;
+        const bTime = b.modifiedAt ? b.modifiedAt.getTime() : 0;
+        return aTime - bTime;
       }
-    }
-    return record.text || "";
-  }
-
-  async function saveStoryArcText(project, text) {
-    const record = getStoryArcRecord(project);
-    const filename = record.filename || "story_arc.txt";
-    const blob = new Blob([text || ""], { type: "text/plain" });
-    const file = new File([blob], filename, { type: "text/plain" });
-    const parentId = await ensureCategoryFolder(project, "storyline");
-    const driveEntry = await storeFileWithDriveAndVector(project, "storyline", filename, file, {
-      parentId,
-      driveId: record.driveId,
+      return aKey.localeCompare(bKey);
     });
-    record.driveId = driveEntry.id;
-    record.fileId = project.driveMappings?.["storyline"]?.[driveEntry.id] || null;
-    record.text = text;
-    project.storyArc = record;
-    saveProjectsToStorage();
-    currentStoryArc = record;
-    return record;
   }
 
-  async function syncStoryAssistants(project) {
-    if (!project) return;
-    const priorCategory = $("#doc-category-select").val();
-    for (const category of STORY_SYNC_CATEGORIES) {
+  function sanitizeVectorFilename(name) {
+    return (name || "untitled").replace(/[\\/:*?"<>|]+/g, "_");
+  }
+
+  async function uploadDocsToVectorStore(vsId, docs, labelPrefix) {
+    const ordered = sortStoryDocs(docs);
+    const uploadedNames = [];
+    for (let i = 0; i < ordered.length; i++) {
+      const doc = ordered[i];
       try {
-        await resyncCategoryFromDrive(project, category);
+        const content = await downloadDriveFile(doc.id);
+        const safeName = `${labelPrefix}_${String(i + 1).padStart(3, "0")}_${sanitizeVectorFilename(doc.baseName || doc.filename)}`;
+        const fileObj = new File([content.blob], safeName, {
+          type: content.blob.type || "application/octet-stream",
+        });
+        const uploadRes = await uploadFileToOpenAI(fileObj);
+        await attachFileToVectorStore(vsId, uploadRes.id);
+        uploadedNames.push(safeName);
+        logLine(`Attached ${safeName} to vector store ${vsId}.`);
       } catch (e) {
-        logLine(`Unable to refresh ${category} for assistants: ${e.message}`, true);
+        logLine(`Failed to upload ${doc.filename || doc.baseName} to vector store: ${e.message}`, true);
       }
     }
-    if (priorCategory) {
-      $("#doc-category-select").val(priorCategory);
-      await renderDocExplorer(project, priorCategory);
-    }
+    return uploadedNames;
   }
 
-  async function openStoryCanvas(project, preferReload = false) {
+  async function ensureStoryDiscussionContext(project, forceRebuild = false) {
+    if (!project) return null;
+
+    if (storyDiscussionState && !forceRebuild) {
+      return storyDiscussionState;
+    }
+
+    const storylineFolderId = await ensureCategoryFolder(project, "storyline");
+    const storylineDocs = (await fetchCategoryDocuments(project, "storyline")).filter(
+      (doc) => (doc.baseName || doc.filename || "").toLowerCase() !== "storyline_outline.json"
+    );
+    const characterDocs = (await fetchCategoryDocuments(project, "characters")).filter(
+      (doc) => !(doc.mimeType || "").toLowerCase().startsWith("image/")
+    );
+
+    const storylineFiles = await listDriveFiles(storylineFolderId);
+    const outlineFile = storylineFiles.find((f) => (f.name || "").toLowerCase() === "storyline_outline.json");
+
+    if (!storylineDocs.length && !outlineFile) {
+      logLine("No storyline documents or storyline_outline.json found. Add storyline files first.", true);
+      return null;
+    }
+
+    const vectorStore = await openaiJson(
+      "/vector_stores",
+      "POST",
+      { name: `${project.name} [story_discussion]` },
+      true,
+      `create story discussion vector store (${project.name})`
+    );
+    const vsId = vectorStore.id;
+    logLine(`Created story discussion vector store: ${vsId}`);
+
+    const storylineNames = await uploadDocsToVectorStore(vsId, storylineDocs, "storyline");
+    const characterNames = await uploadDocsToVectorStore(vsId, characterDocs, "character_reference");
+
+    if (outlineFile) {
+      try {
+        const outlineContent = await downloadDriveFile(outlineFile.id);
+        const safeName = `outline_latest_${sanitizeVectorFilename(outlineFile.name)}`;
+        const fileObj = new File([outlineContent.blob], safeName, { type: outlineContent.blob.type || "application/json" });
+        const uploadRes = await uploadFileToOpenAI(fileObj);
+        await attachFileToVectorStore(vsId, uploadRes.id);
+        storylineNames.unshift(safeName);
+        logLine(`Attached latest storyline outline (${outlineFile.name}) to discussion vector store.`);
+      } catch (e) {
+        logLine(`Failed to attach storyline outline to discussion store: ${e.message}`, true);
+      }
+    } else {
+      logLine("No storyline_outline.json found; discussion assistant will rely on storyline documents only.", true);
+    }
+
+    const assistantInstructions = `
+You are the StoryLine outliner and discussion partner.
+
+Context available in your file_search tools:
+- Storyline documents in chronological order (primary plot source).
+- Character sheets from all character folders (reference for POV, motives, relationships; ignore image files).
+- If present, the latest storyline_outline.json.
+
+Read the character sheets first to understand voices, motives, and relationships. Then read the storyline documents in the exact order provided; do not reorder events.
+
+When asked to discuss or clarify, always stay grounded in these sources. If data seems missing, ask clarifying questions.
+Keep responses concise, actionable, and specific to the referenced chapter/scene ordering.
+`.trim();
+
+    const assistant = await openaiJson(
+      "/assistants",
+      "POST",
+      {
+        name: "Story Discussion Companion",
+        instructions: assistantInstructions,
+        model: assistantModel,
+        tools: [{ type: "file_search" }],
+        tool_resources: { file_search: { vector_store_ids: [vsId] } },
+      },
+      true,
+      "create story discussion assistant"
+    );
+
+    const summaryLines = [
+      `Vector store: ${vsId}`,
+      storylineNames.length
+        ? `Storyline sources (${storylineNames.length}):\n- ${storylineNames.join("\n- ")}`
+        : "Storyline sources: none attached",
+      characterNames.length
+        ? `Character sheets (${characterNames.length}):\n- ${characterNames.join("\n- ")}`
+        : "Character sheets: none attached",
+      outlineFile ? `Outline attached: ${outlineFile.name}` : "Outline attached: none",
+    ];
+
+    storyDiscussionState = {
+      assistantId: assistant.id,
+      vectorStoreId: vsId,
+      sourcesSummary: summaryLines.join("\n\n"),
+      messages: [],
+    };
+
+    resetStoryDiscussionUI(storyDiscussionState.sourcesSummary);
+    return storyDiscussionState;
+  }
+
+  async function openStoryDiscussion(project, forceRefresh = false) {
     if (!project) return;
-    await withStoryLoading(preferReload ? "Reloading story..." : "Loading story...", async () => {
-      await syncStoryAssistants(project);
+    await withStoryLoading(forceRefresh ? "Refreshing story discussion..." : "Preparing story discussion...", async () => {
       hideDocCanvas();
       hideCharacterCanvas();
       $("#story-canvas").addClass("visible");
-      setStoryCanvasMode(storyConversationMode);
-      const text = preferReload ? await loadStoryArc(project, true) : await loadStoryArc(project);
-      const fallback =
-        "Story arc canvas is empty. Generate or paste an arc here. Keep it plain text with a TLDR Story Arc section at the bottom.";
-      setStoryCanvasText(text || fallback);
-      currentStoryArc = getStoryArcRecord(project);
-      if (!text) {
-        pushStoryMessage("system", "No saved story arc found yet. Create one to begin.");
+      storyDiscussionState = null; // always rebuild to ensure latest docs are loaded
+      const state = await ensureStoryDiscussionContext(project, forceRefresh);
+      if (state) {
+        pushStoryMessage(
+          "system",
+          "Story discussion assistant is ready with the latest storyline outline, storyline docs, and character sheets."
+        );
       }
     });
   }
 
-  async function sendStoryCanvasPrompt(project) {
+  async function sendStoryDiscussionPrompt(project) {
     if (!project) {
       alert("Select a project first.");
       return;
     }
     const userPrompt = $("#story-user-prompt").val().trim();
     if (!userPrompt) {
-      alert("Enter a request or question first.");
+      alert("Enter a prompt to discuss the story.");
       return;
     }
     $("#story-user-prompt").val("");
-    const currentText = getStoryCanvasText();
+
+    if (!storyDiscussionState) {
+      await openStoryDiscussion(project, true);
+      if (!storyDiscussionState) return;
+    }
+
+    const history = storyDiscussionState.messages || [];
+    const recentHistory = history.slice(-12);
+    const messages = [...recentHistory, { role: "user", content: userPrompt }];
+
     pushStoryMessage("user", userPrompt);
-
-    if (storyConversationMode === "qa") {
-      const storySources = await buildStorySourceSummary(project);
-      const promptText = `You are answering questions about the project's story arc. Use file_search to consult storyline, outlines, and relationships. Respond in plain text (no markdown).\n\nCurrent story arc text (plain text):\n${currentText || "(none yet)"}\n\nStory sources:\n${storySources}\n\nQuestions:\n${userPrompt}`;
-      const answer = await runProjectAssistant(project, "LoreKeeper", promptText);
-      if (answer) {
-        pushStoryMessage("assistant", answer);
-      }
+    const answer = await runAssistantWithMessages(storyDiscussionState.assistantId, messages);
+    if (!answer) {
+      logLine("Story discussion assistant returned no answer.", true);
       return;
     }
 
-    const editPrompt = `We maintain a plain-text story arc document. It must end with a "TLDR Story Arc" section that lists each book and its chapters in nested, concise outline form with short, decision-focused plot points, emotional hooks, and key facts. Keep everything plain text with indentation (no markdown symbols).\n\nCurrent story arc text:\n${currentText || "(none yet)"}\n\nUser request:\n${userPrompt}\n\nReturn the fully updated story arc text, keeping the TLDR Story Arc section at the bottom.`;
-    const updated = await runProjectAssistant(project, "SeriesArchitect", editPrompt);
-    if (!updated) {
-      logLine("Assistant returned no updated story arc.", true);
-      return;
-    }
-    setStoryCanvasText(updated);
-    await saveStoryArcText(project, updated);
-    pushStoryMessage("assistant", "Story arc updated and saved.");
-  }
-
-  async function refreshStoryArcFromDrive(project) {
-    await withStoryLoading("Reloading story and syncing assistants...", async () => {
-      await syncStoryAssistants(project);
-      const text = await loadStoryArc(project, true);
-      setStoryCanvasText(text);
-      pushStoryMessage("system", "Reloaded story arc from Drive.");
-    });
+    storyDiscussionState.messages = [...messages, { role: "assistant", content: answer }];
+    pushStoryMessage("assistant", answer);
   }
 
   // ==============================
@@ -5005,59 +5136,36 @@ Return the full updated sheet text only.
     );
     const outlineVsId = vectorStore.id;
     logLine(`Created storyline outline vector store: ${outlineVsId}`);
-
-    const sanitizeName = (name) => (name || "untitled").replace(/[\\/:*?"<>|]+/g, "_");
-    const uploadDocsToStore = async (docs, labelPrefix) => {
-      const ordered = [...docs].sort((a, b) => (a.baseName || "").localeCompare(b.baseName || ""));
-      const uploadedNames = [];
-      for (let i = 0; i < ordered.length; i++) {
-        const doc = ordered[i];
-        const content = await downloadDriveFile(doc.id);
-        const safeName = `${labelPrefix}_${String(i + 1).padStart(3, "0")}_${sanitizeName(doc.baseName || doc.filename)}`;
-        const fileObj = new File([content.blob], safeName, {
-          type: content.blob.type || "application/octet-stream",
-        });
-        const uploadRes = await uploadFileToOpenAI(fileObj);
-        await attachFileToVectorStore(outlineVsId, uploadRes.id);
-        uploadedNames.push(safeName);
-        logLine(`Attached ${safeName} to storyline outline vector store.`);
-      }
-      return uploadedNames;
-    };
-
     const storylineDocs = await fetchCategoryDocuments(project, "storyline");
-    const storylineNames = await uploadDocsToStore(storylineDocs, "storyline");
+    const storylineNames = await uploadDocsToVectorStore(outlineVsId, storylineDocs, "storyline");
 
     const characterDocs = (await fetchCategoryDocuments(project, "characters")).filter(
       (doc) => !(doc.mimeType || "").toLowerCase().startsWith("image/")
     );
-    const characterNames = await uploadDocsToStore(characterDocs, "character_reference");
+    const characterNames = await uploadDocsToVectorStore(outlineVsId, characterDocs, "character_reference");
 
     const assistantInstructions = `
-You are the dedicated storyline outline architect for this project. You love long-form novel planning and detailed structural editing.
+You are the StoryLine outliner. You turn storyline documents into a reusable JSON outline.
 
-Your tools: a file search vector store containing (1) storyline source documents (chronological order matters) and (2) character sheets used only as reference.
-
-Goals:
-- Read the storyline documents in the exact order provided, preserving every beat and nuance. Do not reorder or compress away events.
-- Treat character sheets strictly as reference for names, relationships, voices, motives, and facts. They are not plot sources.
-- Decide natural chapter boundaries that keep the narrative flow intact and in-order.
-- Within each chapter, divide the action into ordered scenes.
-- Every chapter and scene must respect the sequence of events from the storyline documents.
-- Produce a JSON outline (no markdown) capturing the chapter/scene hierarchy with concise summaries.
+Preparation:
+- Read every character sheet FIRST to internalize voices, motives, relationships, and tone. Use them only as reference, never as plot.
+- Then read the storyline documents strictly in the provided order (they are chronological and canonical). Do not reorder or merge beats; preserve sequence fidelity.
+- Ensure you understand the entire story before writing any summaries.
 
 JSON structure to emit:
 {
   "chapters": [
     {
       "chapter_number": <int, 1-indexed and sequential>,
+      "chapter_id": "C<chapter_number>",
       "chapter_title": "Short working title (optional but encouraged)",
-      "chapter_summary": "2-4 sentences: what happens in this chapter and the major plot developments across its scenes.",
+      "chapter_summary": "2-4 sentences explaining what happens in the chapter and how it moves the plot.",
       "scenes": [
         {
           "scene_number": <int, 1-indexed within the chapter>,
+          "scene_id": "C<chapter_number>S<scene_number>",
           "pov_character": "Primary POV character for the scene",
-          "scene_summary": "2-3 sentences describing the events/progression of the scene in order."
+          "scene_summary": "2-3 sentences describing the scene events in strict order."
         }
       ]
     }
@@ -5065,18 +5173,18 @@ JSON structure to emit:
 }
 
 Rules:
-- Output pure JSON only (no code fences or commentary).
-- Keep chapters and scenes strictly ordered by the source storyline sequence.
-- Do not invent new plot points; stay grounded in the storyline docs.
-- Maintain brevity but clarity: short, vivid summaries.
-- If uncertain about sequencing, bias toward the original storyline ordering.
+- Output pure JSON only (no code fences, no commentary).
+- Chapters and scenes must be strictly sequential with no gaps or duplicates (e.g., Chapter 1 Scene 1, Chapter 1 Scene 2, ..., Chapter 2 Scene 1).
+- Respect the storyline ordering—never shuffle or omit beats.
+- Keep summaries concise but informative; avoid inventing events.
+- Bias toward clarity and faithful sequencing over brevity if unsure.
 `.trim();
 
     const assistant = await openaiJson(
       "/assistants",
       "POST",
       {
-        name: "storyline_outline",
+        name: "StoryLine outliner",
         instructions: assistantInstructions,
         model: assistantModel,
         tools: [{ type: "file_search" }],
@@ -5094,16 +5202,16 @@ Rules:
       : "(no character sheets uploaded)";
 
     const userPrompt = `
-Read every storyline document in this exact order (do not reorder):
-${storylineListText}
-
-Character sheets (reference only; do not treat as plot):
+Read every character sheet first (reference only; do not treat as plot):
 ${characterListText}
 
+Then read every storyline document in this exact order (do not reorder):
+${storylineListText}
+
 Task:
-- Synthesize the storyline into numbered chapters and ordered scenes while keeping all events in sequence.
-- Write short, decisive summaries for each scene and chapter.
-- Respect POV needs by naming the main perspective character for every scene.
+- Build numbered chapters and nested scenes that follow this exact order.
+- Use chapter_id and scene_id fields to reflect nesting (C1S1, C1S2, ... C2S1, etc.).
+- Write short, decisive summaries using the full story context before drafting.
 - Return ONLY the JSON described in your system instructions. Do not wrap it in markdown or add commentary.
 `.trim();
 
@@ -5134,6 +5242,8 @@ Task:
       json: outlineJson,
     };
     saveProjectsToStorage();
+
+    storyDiscussionState = null; // force a fresh discussion context to pick up the new outline
 
     const dlUrl = URL.createObjectURL(jsonBlob);
     logLine("Storyline outline generated, uploaded, and ready.");
@@ -6732,12 +6842,12 @@ Please:
         alert("Select a project first.");
         return;
       }
-      await openStoryCanvas(project, false);
+      await openStoryDiscussion(project, false);
     });
 
     $("#story-send-btn").on("click", async function () {
       const project = getCurrentProject();
-      await sendStoryCanvasPrompt(project);
+      await sendStoryDiscussionPrompt(project);
     });
 
     $("#story-user-prompt").on("keydown", function (e) {
@@ -6747,18 +6857,10 @@ Please:
       }
     });
 
-    $("#story-save-btn").on("click", async function () {
-      const project = getCurrentProject();
-      if (!project) return;
-      const text = getStoryCanvasText();
-      await saveStoryArcText(project, text);
-      pushStoryMessage("system", "Story arc saved to Drive.");
-    });
-
     $("#story-refresh-btn").on("click", async function () {
       const project = getCurrentProject();
       if (!project) return;
-      await refreshStoryArcFromDrive(project);
+      await openStoryDiscussion(project, true);
     });
 
     $("#doc-drafts-toggle").on("click", async function () {
@@ -7023,16 +7125,6 @@ Please:
         await buildStorylineOutline(project);
       } catch (e) {
         logLine("Error building storyline outline: " + e.message, true);
-      }
-    });
-
-    $("#build-book-outline-btn").on("click", async function () {
-      const project = getCurrentProject();
-      if (!project) return;
-      try {
-        await buildBookOutline(project);
-      } catch (e) {
-        logLine("Error building book outline: " + e.message, true);
       }
     });
 
