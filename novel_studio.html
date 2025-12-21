@@ -70,6 +70,20 @@
         transform: rotate(360deg);
       }
     }
+    @keyframes pulse {
+      0% {
+        transform: scale(1);
+        box-shadow: 0 0 14px rgba(102, 252, 241, 0.25);
+      }
+      50% {
+        transform: scale(1.08);
+        box-shadow: 0 0 22px rgba(102, 252, 241, 0.35);
+      }
+      100% {
+        transform: scale(1);
+        box-shadow: 0 0 14px rgba(102, 252, 241, 0.25);
+      }
+    }
     .section-title {
       font-weight: bold;
       margin-top: 10px;
@@ -1058,6 +1072,75 @@
       animation: spin 0.85s linear infinite;
     }
 
+    #outline-progress-overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.75);
+      z-index: 65;
+      backdrop-filter: blur(2px);
+    }
+
+    #outline-progress-overlay.visible {
+      display: flex;
+    }
+
+    #outline-progress-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 20px 26px;
+      background: #0f141c;
+      border: 1px solid #1f2833;
+      border-radius: 10px;
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
+      color: #e5e5e5;
+      max-width: 360px;
+      text-align: center;
+    }
+
+    .outline-pin {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, #1f2833, #0b0c10);
+      border: 2px solid #66fcf1;
+      box-shadow: 0 0 18px rgba(102, 252, 241, 0.2);
+      animation: pulse 1.4s ease-in-out infinite;
+      font-size: 26px;
+    }
+
+    .outline-progress-title {
+      font-weight: 700;
+      color: #66fcf1;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-size: 13px;
+    }
+
+    .outline-progress-message {
+      font-size: 13px;
+      color: #c5c6c7;
+      line-height: 1.5;
+    }
+
+    .outline-progress-subtext {
+      font-size: 12px;
+      color: #9ea0a2;
+      line-height: 1.4;
+    }
+
+    body.outline-progress-active #app {
+      pointer-events: none;
+      user-select: none;
+      filter: blur(1px);
+    }
+
     body.story-loading-active #app {
       pointer-events: none;
       user-select: none;
@@ -1098,6 +1181,14 @@
       </div>
     </div>
     <div id="auth-status-text">Waiting for sign-in...</div>
+  </div>
+</div>
+<div id="outline-progress-overlay">
+  <div id="outline-progress-card">
+    <div class="outline-pin">📌</div>
+    <div class="outline-progress-title">Building storyline outline</div>
+    <div id="outline-progress-message" class="outline-progress-message">Gathering documents...</div>
+    <div class="outline-progress-subtext">We will keep this pinned open until the outline finishes.</div>
   </div>
 </div>
 <div id="project-picker-overlay">
@@ -2533,6 +2624,21 @@
     document.body.classList.remove("story-loading-active");
   }
 
+  function showOutlineProgress(message = "Preparing storyline outline...") {
+    $("#outline-progress-message").text(message);
+    $("#outline-progress-overlay").addClass("visible");
+    document.body.classList.add("outline-progress-active");
+  }
+
+  function updateOutlineProgress(message = "Working...") {
+    $("#outline-progress-message").text(message);
+  }
+
+  function hideOutlineProgress() {
+    $("#outline-progress-overlay").removeClass("visible");
+    document.body.classList.remove("outline-progress-active");
+  }
+
   async function ensureStoryPostLoadSync() {
     const project = getCurrentProject();
     if (!project) return;
@@ -2585,7 +2691,7 @@
 
   function fetchWithTimeout(url, options, label = "request") {
     const controller = new AbortController();
-    const merged = { ...options, signal: controller.signal };
+    const merged = { mode: "cors", cache: "no-store", ...options, signal: controller.signal };
     const summary = summarizeRequestOptions(url, merged);
     beginLoading();
     logLine(
@@ -5177,6 +5283,7 @@ Keep responses concise, actionable, and specific to the referenced chapter/scene
   // ==============================
 
   async function buildStorylineOutline(project) {
+    showOutlineProgress(`Pinning storyline outline for ${project.name}...`);
     logLine(`[buildStorylineOutline] Starting outline build for project ${project.name}.`);
     const storylineFolderId = await ensureCategoryFolder(project, "storyline");
     logLine(`[buildStorylineOutline] Using storyline folder ${storylineFolderId}. Dropping any existing outline files.`);
@@ -5199,38 +5306,43 @@ Keep responses concise, actionable, and specific to the referenced chapter/scene
       }
     }
 
-    const vectorStore = await openaiJson(
-      "/vector_stores",
-      "POST",
-      { name: `${project.name} [storyline_outline]` },
-      true,
-      `create storyline outline vector store (${project.name})`
-    );
-    const outlineVsId = vectorStore.id;
-    logLine(
-      `[buildStorylineOutline] Created storyline outline vector store: ${outlineVsId}. Preparing to upload storyline docs.`
-    );
-    const storylineDocs = await fetchCategoryDocuments(project, "storyline");
-    const storylineDocDetails = storylineDocs
-      .map((doc, idx) => `${idx + 1}. ${doc.baseName || doc.filename || "(untitled)"} [${doc.id || "no-id"}]`)
-      .join(" | ");
-    logLine(
-      `[buildStorylineOutline] Found ${storylineDocs.length} storyline documents to upload: ${storylineDocDetails || "(none)"}.`
-    );
-    const storylineNames = await uploadDocsToVectorStore(outlineVsId, storylineDocs, "storyline");
+    try {
+      updateOutlineProgress("Creating a fresh vector store for the outline...");
+      const vectorStore = await openaiJson(
+        "/vector_stores",
+        "POST",
+        { name: `${project.name} [storyline_outline]` },
+        true,
+        `create storyline outline vector store (${project.name})`
+      );
+      const outlineVsId = vectorStore.id;
+      logLine(
+        `[buildStorylineOutline] Created storyline outline vector store: ${outlineVsId}. Preparing to upload storyline docs.`
+      );
+      updateOutlineProgress("Uploading storyline documents...");
+      const storylineDocs = await fetchCategoryDocuments(project, "storyline");
+      const storylineDocDetails = storylineDocs
+        .map((doc, idx) => `${idx + 1}. ${doc.baseName || doc.filename || "(untitled)"} [${doc.id || "no-id"}]`)
+        .join(" | ");
+      logLine(
+        `[buildStorylineOutline] Found ${storylineDocs.length} storyline documents to upload: ${storylineDocDetails || "(none)"}.`
+      );
+      const storylineNames = await uploadDocsToVectorStore(outlineVsId, storylineDocs, "storyline");
 
-    const characterDocs = (await fetchCategoryDocuments(project, "characters")).filter(
-      (doc) => !(doc.mimeType || "").toLowerCase().startsWith("image/")
-    );
-    const characterDocDetails = characterDocs
-      .map((doc, idx) => `${idx + 1}. ${doc.baseName || doc.filename || "(untitled)"} [${doc.id || "no-id"}]`)
-      .join(" | ");
-    logLine(
-      `[buildStorylineOutline] Found ${characterDocs.length} character reference documents to upload: ${characterDocDetails || "(none)"}.`
-    );
-    const characterNames = await uploadDocsToVectorStore(outlineVsId, characterDocs, "character_reference");
+      updateOutlineProgress("Uploading character references...");
+      const characterDocs = (await fetchCategoryDocuments(project, "characters")).filter(
+        (doc) => !(doc.mimeType || "").toLowerCase().startsWith("image/")
+      );
+      const characterDocDetails = characterDocs
+        .map((doc, idx) => `${idx + 1}. ${doc.baseName || doc.filename || "(untitled)"} [${doc.id || "no-id"}]`)
+        .join(" | ");
+      logLine(
+        `[buildStorylineOutline] Found ${characterDocs.length} character reference documents to upload: ${characterDocDetails || "(none)"}.`
+      );
+      const characterNames = await uploadDocsToVectorStore(outlineVsId, characterDocs, "character_reference");
 
-    const assistantInstructions = `
+      updateOutlineProgress("Asking the assistant to draft the outline...");
+      const assistantInstructions = `
 You are the StoryLine outliner. You turn storyline documents into a reusable JSON outline.
 
 Preparation:
@@ -5301,39 +5413,45 @@ Task:
 - Return ONLY the JSON described in your system instructions. Do not wrap it in markdown or add commentary.
 `.trim();
 
-    const raw = await runAssistantOnce(assistant.id, userPrompt);
-    if (!raw) {
-      logLine("Storyline outline assistant returned no output.", true);
-      return;
+      const raw = await runAssistantOnce(assistant.id, userPrompt);
+      if (!raw) {
+        logLine("Storyline outline assistant returned no output.", true);
+        return;
+      }
+
+      let outlineJson;
+      try {
+        outlineJson = JSON.parse(raw);
+      } catch (e) {
+        logLine("Failed to parse storyline outline JSON: " + e.message, true);
+        logLine("Raw output (first 1200 chars): " + raw.slice(0, 1200), true);
+        return;
+      }
+
+      updateOutlineProgress("Saving the new outline to Drive...");
+      const jsonBlob = new Blob([JSON.stringify(outlineJson, null, 2)], { type: "application/json" });
+      const driveEntry = await storeFileWithDriveAndVector(project, "storyline", "storyline_outline.json", jsonBlob, {
+        parentId: storylineFolderId,
+      });
+
+      project.outlines = project.outlines || {};
+      project.outlines.storyline_outline = {
+        driveId: driveEntry.id,
+        fileId: project.driveMappings?.["storyline"]?.[driveEntry.id] || null,
+        json: outlineJson,
+      };
+      saveProjectsToStorage();
+
+      storyDiscussionState = null; // force a fresh discussion context to pick up the new outline
+
+      const dlUrl = URL.createObjectURL(jsonBlob);
+      logLine("Storyline outline generated, uploaded, and ready.");
+      logLink("Download storyline_outline.json", dlUrl, "storyline_outline.json");
+      hideOutlineProgress();
+      alert("🎉 Congratulations! Your storyline outline has been created and pinned to Drive.");
+    } finally {
+      hideOutlineProgress();
     }
-
-    let outlineJson;
-    try {
-      outlineJson = JSON.parse(raw);
-    } catch (e) {
-      logLine("Failed to parse storyline outline JSON: " + e.message, true);
-      logLine("Raw output (first 1200 chars): " + raw.slice(0, 1200), true);
-      return;
-    }
-
-    const jsonBlob = new Blob([JSON.stringify(outlineJson, null, 2)], { type: "application/json" });
-    const driveEntry = await storeFileWithDriveAndVector(project, "storyline", "storyline_outline.json", jsonBlob, {
-      parentId: storylineFolderId,
-    });
-
-    project.outlines = project.outlines || {};
-    project.outlines.storyline_outline = {
-      driveId: driveEntry.id,
-      fileId: project.driveMappings?.["storyline"]?.[driveEntry.id] || null,
-      json: outlineJson,
-    };
-    saveProjectsToStorage();
-
-    storyDiscussionState = null; // force a fresh discussion context to pick up the new outline
-
-    const dlUrl = URL.createObjectURL(jsonBlob);
-    logLine("Storyline outline generated, uploaded, and ready.");
-    logLink("Download storyline_outline.json", dlUrl, "storyline_outline.json");
   }
 
   async function buildBookOutline(project) {
