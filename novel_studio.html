@@ -1282,7 +1282,7 @@
         </div>
         <div class="menu-subgroup">
           <div class="menu-subtitle">Outlines</div>
-          <button id="build-trilogy-outline-btn">Build Trilogy Outline (Text)</button>
+          <button id="build-trilogy-outline-btn">Build Storyline Outline (JSON)</button>
           <button id="build-book-outline-btn">Build Book Outline (JSON)</button>
         </div>
         <div class="menu-subgroup">
@@ -3253,6 +3253,7 @@
       const payload = body ? JSON.stringify(body) : "(no payload)";
       const context = label ? ` [${label}]` : "";
       logLine(`OpenAI request failed${context} for ${method} ${url}. Payload: ${payload}. Error: ${err.message}`, true);
+      logOpenaiDiagnostics(requestLabel, err);
       throw err;
     }
   }
@@ -3281,6 +3282,7 @@
       return await res.json();
     } catch (err) {
       logLine(`OpenAI form-data request failed for POST ${url}. Payload: [form data]. Error: ${err.message}`, true);
+      logOpenaiDiagnostics(requestLabel, err);
       throw err;
     }
   }
@@ -3308,7 +3310,22 @@
       return await res.blob();
     } catch (err) {
       logLine(`OpenAI audio request failed for POST ${url}. Payload: ${JSON.stringify(body)}. Error: ${err.message}`, true);
+      logOpenaiDiagnostics(requestLabel, err);
       throw err;
+    }
+  }
+
+  function logOpenaiDiagnostics(label, err) {
+    try {
+      const maskedKey = apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : "(not set)";
+      const locationInfo = `${location.protocol}//${location.host}${location.pathname}`;
+      const reason = err ? `${err.name}: ${err.message}` : "unknown";
+      logLine(
+        `OpenAI debug (${label || "request"}): apiKey=${maskedKey}; online=${navigator?.onLine}; page=${locationInfo}; reason=${reason}`,
+        true,
+      );
+    } catch (_) {
+      // best-effort debug helper
     }
   }
 
@@ -4958,43 +4975,169 @@ Return the full updated sheet text only.
   // WORKFLOWS: OUTLINES & CHAPTERS
   // ==============================
 
-  async function buildTrilogyOutline(project) {
-    const prompt = `
-Using all available lore, campaign notes, and outlines in this project:
-- Propose a 3-book trilogy structure.
-- Follow your system instructions.
+  async function buildStorylineOutline(project) {
+    const storylineFolderId = await ensureCategoryFolder(project, "storyline");
+    const storylineFiles = await listDriveFiles(storylineFolderId);
+    const existingOutlineFiles = storylineFiles.filter(
+      (f) => (f.name || "").toLowerCase() === "storyline_outline.json"
+    );
 
-Add at the end a plain-text "TLDR Story Arc" section that lists each book and its chapters in nested order. Each entry should be a short, decision-focused plot beat with the key emotional hook. Keep the entire response plain text (no markdown symbols).
+    for (const file of existingOutlineFiles) {
+      try {
+        await dropVectorMapping(project, "storyline", file.id);
+      } catch (e) {
+        logLine(`Unable to drop old storyline outline mapping: ${e.message}`, true);
+      }
+      try {
+        await deleteDriveFile(file.id);
+        logLine("Removed existing storyline_outline.json from Drive.");
+      } catch (e) {
+        logLine(`Failed to delete old storyline outline: ${e.message}`, true);
+      }
+    }
 
-Structure your answer like:
+    const vectorStore = await openaiJson(
+      "/vector_stores",
+      "POST",
+      { name: `${project.name} [storyline_outline]` },
+      true,
+      `create storyline outline vector store (${project.name})`
+    );
+    const outlineVsId = vectorStore.id;
+    logLine(`Created storyline outline vector store: ${outlineVsId}`);
 
-1. Trilogy Overview
-2. Book 1 - [Working Title]
-3. Book 2 - [Working Title]
-4. Book 3 - [Working Title]
+    const sanitizeName = (name) => (name || "untitled").replace(/[\\/:*?"<>|]+/g, "_");
+    const uploadDocsToStore = async (docs, labelPrefix) => {
+      const ordered = [...docs].sort((a, b) => (a.baseName || "").localeCompare(b.baseName || ""));
+      const uploadedNames = [];
+      for (let i = 0; i < ordered.length; i++) {
+        const doc = ordered[i];
+        const content = await downloadDriveFile(doc.id);
+        const safeName = `${labelPrefix}_${String(i + 1).padStart(3, "0")}_${sanitizeName(doc.baseName || doc.filename)}`;
+        const fileObj = new File([content.blob], safeName, {
+          type: content.blob.type || "application/octet-stream",
+        });
+        const uploadRes = await uploadFileToOpenAI(fileObj);
+        await attachFileToVectorStore(outlineVsId, uploadRes.id);
+        uploadedNames.push(safeName);
+        logLine(`Attached ${safeName} to storyline outline vector store.`);
+      }
+      return uploadedNames;
+    };
+
+    const storylineDocs = await fetchCategoryDocuments(project, "storyline");
+    const storylineNames = await uploadDocsToStore(storylineDocs, "storyline");
+
+    const characterDocs = (await fetchCategoryDocuments(project, "characters")).filter(
+      (doc) => !(doc.mimeType || "").toLowerCase().startsWith("image/")
+    );
+    const characterNames = await uploadDocsToStore(characterDocs, "character_reference");
+
+    const assistantInstructions = `
+You are the dedicated storyline outline architect for this project. You love long-form novel planning and detailed structural editing.
+
+Your tools: a file search vector store containing (1) storyline source documents (chronological order matters) and (2) character sheets used only as reference.
+
+Goals:
+- Read the storyline documents in the exact order provided, preserving every beat and nuance. Do not reorder or compress away events.
+- Treat character sheets strictly as reference for names, relationships, voices, motives, and facts. They are not plot sources.
+- Decide natural chapter boundaries that keep the narrative flow intact and in-order.
+- Within each chapter, divide the action into ordered scenes.
+- Every chapter and scene must respect the sequence of events from the storyline documents.
+- Produce a JSON outline (no markdown) capturing the chapter/scene hierarchy with concise summaries.
+
+JSON structure to emit:
+{
+  "chapters": [
+    {
+      "chapter_number": <int, 1-indexed and sequential>,
+      "chapter_title": "Short working title (optional but encouraged)",
+      "chapter_summary": "2-4 sentences: what happens in this chapter and the major plot developments across its scenes.",
+      "scenes": [
+        {
+          "scene_number": <int, 1-indexed within the chapter>,
+          "pov_character": "Primary POV character for the scene",
+          "scene_summary": "2-3 sentences describing the events/progression of the scene in order."
+        }
+      ]
+    }
+  ]
+}
+
+Rules:
+- Output pure JSON only (no code fences or commentary).
+- Keep chapters and scenes strictly ordered by the source storyline sequence.
+- Do not invent new plot points; stay grounded in the storyline docs.
+- Maintain brevity but clarity: short, vivid summaries.
+- If uncertain about sequencing, bias toward the original storyline ordering.
 `.trim();
 
-    const text = await runProjectAssistant(project, "SeriesArchitect", prompt);
-    if (!text) {
-      logLine("No trilogy outline returned.", true);
+    const assistant = await openaiJson(
+      "/assistants",
+      "POST",
+      {
+        name: "storyline_outline",
+        instructions: assistantInstructions,
+        model: assistantModel,
+        tools: [{ type: "file_search" }],
+        tool_resources: { file_search: { vector_store_ids: [outlineVsId] } },
+      },
+      true,
+      "create storyline outline assistant"
+    );
+
+    const storylineListText = storylineNames.length
+      ? storylineNames.map((n, idx) => `${idx + 1}. ${n}`).join("\n")
+      : "(no storyline files uploaded)";
+    const characterListText = characterNames.length
+      ? characterNames.map((n, idx) => `${idx + 1}. ${n}`).join("\n")
+      : "(no character sheets uploaded)";
+
+    const userPrompt = `
+Read every storyline document in this exact order (do not reorder):
+${storylineListText}
+
+Character sheets (reference only; do not treat as plot):
+${characterListText}
+
+Task:
+- Synthesize the storyline into numbered chapters and ordered scenes while keeping all events in sequence.
+- Write short, decisive summaries for each scene and chapter.
+- Respect POV needs by naming the main perspective character for every scene.
+- Return ONLY the JSON described in your system instructions. Do not wrap it in markdown or add commentary.
+`.trim();
+
+    const raw = await runAssistantOnce(assistant.id, userPrompt);
+    if (!raw) {
+      logLine("Storyline outline assistant returned no output.", true);
       return;
     }
 
+    let outlineJson;
+    try {
+      outlineJson = JSON.parse(raw);
+    } catch (e) {
+      logLine("Failed to parse storyline outline JSON: " + e.message, true);
+      logLine("Raw output (first 1200 chars): " + raw.slice(0, 1200), true);
+      return;
+    }
+
+    const jsonBlob = new Blob([JSON.stringify(outlineJson, null, 2)], { type: "application/json" });
+    const driveEntry = await storeFileWithDriveAndVector(project, "storyline", "storyline_outline.json", jsonBlob, {
+      parentId: storylineFolderId,
+    });
+
     project.outlines = project.outlines || {};
-    project.outlines["trilogy_markdown"] = { text: text };
-    const arcRecord = await saveStoryArcText(project, text);
+    project.outlines.storyline_outline = {
+      driveId: driveEntry.id,
+      fileId: project.driveMappings?.["storyline"]?.[driveEntry.id] || null,
+      json: outlineJson,
+    };
     saveProjectsToStorage();
 
-    logLine("Trilogy outline generated and stored as the story arc.");
-    const blob = new Blob([text], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const $link = $("<a>")
-      .addClass("download-link")
-      .attr("href", url)
-      .attr("download", arcRecord?.filename || "story_arc.txt")
-      .text(`Download ${arcRecord?.filename || "story_arc.txt"}`);
-    logLine("Click to download trilogy outline:");
-    logLink(`Download ${arcRecord?.filename || "story_arc.txt"}`, url, arcRecord?.filename || "story_arc.txt");
+    const dlUrl = URL.createObjectURL(jsonBlob);
+    logLine("Storyline outline generated, uploaded, and ready.");
+    logLink("Download storyline_outline.json", dlUrl, "storyline_outline.json");
   }
 
   async function buildBookOutline(project) {
@@ -6877,9 +7020,9 @@ Please:
       const project = getCurrentProject();
       if (!project) return;
       try {
-        await buildTrilogyOutline(project);
+        await buildStorylineOutline(project);
       } catch (e) {
-        logLine("Error building trilogy outline: " + e.message, true);
+        logLine("Error building storyline outline: " + e.message, true);
       }
     });
 
