@@ -2356,6 +2356,55 @@
     appendToConsole($content, isError);
   }
 
+  function safeTruncate(text, max = 800) {
+    if (!text) return "";
+    if (text.length <= max) return text;
+    return text.slice(0, max) + `... [truncated ${text.length - max} chars]`;
+  }
+
+  function redactHeaderValue(header, value) {
+    if (!value) return value;
+    if (header.toLowerCase() === "authorization") {
+      const tail = value.slice(-6);
+      return value.startsWith("Bearer") ? `Bearer ***${tail}` : `***${tail}`;
+    }
+    return value;
+  }
+
+  function summarizeRequestOptions(url, options) {
+    const method = (options && options.method) || "GET";
+    let payloadSummary = "(none)";
+    if (options && options.body) {
+      if (options.body instanceof FormData) {
+        const keys = [];
+        for (const [k] of options.body.entries()) keys.push(k);
+        payloadSummary = `[form-data keys: ${keys.join(", ")}]`;
+      } else if (typeof options.body === "string") {
+        payloadSummary = safeTruncate(options.body, 1200);
+      } else {
+        try {
+          payloadSummary = safeTruncate(JSON.stringify(options.body), 1200);
+        } catch (e) {
+          payloadSummary = String(options.body);
+        }
+      }
+    }
+
+    const redactedHeaders = {};
+    if (options && options.headers) {
+      for (const [key, value] of Object.entries(options.headers)) {
+        redactedHeaders[key] = redactHeaderValue(key, value);
+      }
+    }
+
+    return { method, payloadSummary, redactedHeaders, url };
+  }
+
+  function logUserAction(action, details = {}) {
+    const detailText = Object.keys(details).length ? ` | details=${JSON.stringify(details)}` : "";
+    logLine(`[ACTION] ${action}${detailText}`);
+  }
+
   function collectConsoleText() {
     return $("#console-log .line")
       .map((_, el) => $(el).text())
@@ -2534,8 +2583,13 @@
   function fetchWithTimeout(url, options, label = "request") {
     const controller = new AbortController();
     const merged = { ...options, signal: controller.signal };
+    const summary = summarizeRequestOptions(url, merged);
     beginLoading();
-    logLine(`Sending ${label}...`);
+    logLine(
+      `[${label}] Sending request -> ${summary.method} ${summary.url} | payload=${summary.payloadSummary} | headers=${JSON.stringify(
+        summary.redactedHeaders
+      )}`
+    );
     const waitInterval = setInterval(() => logLine(`Waiting on ${label}...`), 15000);
     const timeoutId = setTimeout(() => {
       controller.abort();
@@ -2543,15 +2597,15 @@
     }, 300000);
     return fetch(url, merged)
       .then((res) => {
-        logLine(`${label} response received.`);
+        logLine(`[${label}] response received with status ${res.status}.`);
         return res;
       })
       .catch((err) => {
         if (err.name === "AbortError") {
-          logLine(`${label} was cancelled or timed out.`, true);
+          logLine(`${label} was cancelled or timed out. [fetchWithTimeout]`, true);
           setStatus(`${label} cancelled. Please retry.`);
         } else {
-          logLine(`${label} failed: ${err.message}`, true);
+          logLine(`${label} failed in fetchWithTimeout: ${err.message}`, true);
           setStatus(`${label} failed. Check connection and try again.`);
         }
         throw err;
@@ -3244,7 +3298,10 @@
     } catch (err) {
       const payload = body ? JSON.stringify(body) : "(no payload)";
       const context = label ? ` [${label}]` : "";
-      logLine(`OpenAI request failed${context} for ${method} ${url}. Payload: ${payload}. Error: ${err.message}`, true);
+      logLine(
+        `[openaiJson] OpenAI request failed${context} for ${method} ${url}. Payload: ${payload}. Error: ${err.message}`,
+        true
+      );
       logOpenaiDiagnostics(requestLabel, err);
       throw err;
     }
@@ -3273,7 +3330,10 @@
       }
       return await res.json();
     } catch (err) {
-      logLine(`OpenAI form-data request failed for POST ${url}. Payload: [form data]. Error: ${err.message}`, true);
+      logLine(
+        `[openaiFormData] OpenAI form-data request failed for POST ${url}. Payload: [form data]. Error: ${err.message}`,
+        true
+      );
       logOpenaiDiagnostics(requestLabel, err);
       throw err;
     }
@@ -3301,7 +3361,10 @@
       // Expect binary audio
       return await res.blob();
     } catch (err) {
-      logLine(`OpenAI audio request failed for POST ${url}. Payload: ${JSON.stringify(body)}. Error: ${err.message}`, true);
+      logLine(
+        `[openaiAudio] OpenAI audio request failed for POST ${url}. Payload: ${JSON.stringify(body)}. Error: ${err.message}`,
+        true
+      );
       logOpenaiDiagnostics(requestLabel, err);
       throw err;
     }
@@ -4935,6 +4998,9 @@ Return the full updated sheet text only.
     for (let i = 0; i < ordered.length; i++) {
       const doc = ordered[i];
       try {
+        logLine(
+          `[uploadDocsToVectorStore] Preparing upload for ${doc.id} (${doc.baseName || doc.filename}) to ${vsId} as ${labelPrefix}.`
+        );
         const content = await downloadDriveFile(doc.id);
         const safeName = `${labelPrefix}_${String(i + 1).padStart(3, "0")}_${sanitizeVectorFilename(doc.baseName || doc.filename)}`;
         const fileObj = new File([content.blob], safeName, {
@@ -4945,7 +5011,10 @@ Return the full updated sheet text only.
         uploadedNames.push(safeName);
         logLine(`Attached ${safeName} to vector store ${vsId}.`);
       } catch (e) {
-        logLine(`Failed to upload ${doc.filename || doc.baseName} to vector store: ${e.message}`, true);
+        logLine(
+          `[uploadDocsToVectorStore] Failed to upload ${doc.filename || doc.baseName} (${doc.id}) to vector store ${vsId}: ${e.message}`,
+          true
+        );
       }
     }
     return uploadedNames;
@@ -5107,7 +5176,9 @@ Keep responses concise, actionable, and specific to the referenced chapter/scene
   // ==============================
 
   async function buildStorylineOutline(project) {
+    logLine(`[buildStorylineOutline] Starting outline build for project ${project.name}.`);
     const storylineFolderId = await ensureCategoryFolder(project, "storyline");
+    logLine(`[buildStorylineOutline] Using storyline folder ${storylineFolderId}. Dropping any existing outline files.`);
     const storylineFiles = await listDriveFiles(storylineFolderId);
     const existingOutlineFiles = storylineFiles.filter(
       (f) => (f.name || "").toLowerCase() === "storyline_outline.json"
@@ -5117,13 +5188,13 @@ Keep responses concise, actionable, and specific to the referenced chapter/scene
       try {
         await dropVectorMapping(project, "storyline", file.id);
       } catch (e) {
-        logLine(`Unable to drop old storyline outline mapping: ${e.message}`, true);
+        logLine(`[buildStorylineOutline] Unable to drop old storyline outline mapping (${file.id}): ${e.message}`, true);
       }
       try {
         await deleteDriveFile(file.id);
         logLine("Removed existing storyline_outline.json from Drive.");
       } catch (e) {
-        logLine(`Failed to delete old storyline outline: ${e.message}`, true);
+        logLine(`[buildStorylineOutline] Failed to delete old storyline outline (${file.id}): ${e.message}`, true);
       }
     }
 
@@ -5135,12 +5206,26 @@ Keep responses concise, actionable, and specific to the referenced chapter/scene
       `create storyline outline vector store (${project.name})`
     );
     const outlineVsId = vectorStore.id;
-    logLine(`Created storyline outline vector store: ${outlineVsId}`);
+    logLine(
+      `[buildStorylineOutline] Created storyline outline vector store: ${outlineVsId}. Preparing to upload storyline docs.`
+    );
     const storylineDocs = await fetchCategoryDocuments(project, "storyline");
+    const storylineDocDetails = storylineDocs
+      .map((doc, idx) => `${idx + 1}. ${doc.baseName || doc.filename || "(untitled)"} [${doc.id || "no-id"}]`)
+      .join(" | ");
+    logLine(
+      `[buildStorylineOutline] Found ${storylineDocs.length} storyline documents to upload: ${storylineDocDetails || "(none)"}.`
+    );
     const storylineNames = await uploadDocsToVectorStore(outlineVsId, storylineDocs, "storyline");
 
     const characterDocs = (await fetchCategoryDocuments(project, "characters")).filter(
       (doc) => !(doc.mimeType || "").toLowerCase().startsWith("image/")
+    );
+    const characterDocDetails = characterDocs
+      .map((doc, idx) => `${idx + 1}. ${doc.baseName || doc.filename || "(untitled)"} [${doc.id || "no-id"}]`)
+      .join(" | ");
+    logLine(
+      `[buildStorylineOutline] Found ${characterDocs.length} character reference documents to upload: ${characterDocDetails || "(none)"}.`
     );
     const characterNames = await uploadDocsToVectorStore(outlineVsId, characterDocs, "character_reference");
 
@@ -7121,6 +7206,7 @@ Please:
     $("#build-trilogy-outline-btn").on("click", async function () {
       const project = getCurrentProject();
       if (!project) return;
+      logUserAction("build-trilogy-outline-btn clicked", { project: project.name });
       try {
         await buildStorylineOutline(project);
       } catch (e) {
