@@ -1141,6 +1141,13 @@
         <input type="password" id="api-key-input" placeholder="Enter OpenAI API key" />
         <button id="set-api-key-btn">Set API Key</button>
         <div id="api-key-status" style="font-size:11px;color:#c5c6c7;">Not set</div>
+        <button
+          id="clear-session-btn"
+          class="small"
+          style="background:#ff6b6b;color:#0b0c10;margin-top:6px;align-self:flex-start;"
+        >
+          Logout &amp; Clear Session Cookie
+        </button>
       </div>
     </details>
 
@@ -1458,6 +1465,10 @@
   const ASSISTANT_MODELS = ["gpt-4.1", "gpt-4o", "gpt-4o-mini"];
   const HARDCODED_GOOGLE_CLIENT_ID = "310598630732-eim15b73qojoto7o9ubn61uit44gb3je.apps.googleusercontent.com";
   let googleClientId = HARDCODED_GOOGLE_CLIENT_ID;
+  const SESSION_COOKIE_NAME = "novelStudioSession";
+  const SESSION_COOKIE_MAX_DAYS = 14;
+  const SESSION_COOKIE_VERSION = 1;
+  const SESSION_HEARTBEAT_MS = 4 * 60 * 1000;
   const GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/drive.file",
@@ -1490,6 +1501,7 @@
   let docAudioElement = null;
   let googleTokenClient = null;
   let googleAccessToken = null;
+  let googleTokenExpiry = null;
   let googleAuthorized = false;
   let googleDriveReady = false;
   let googleInitPromise = null;
@@ -1500,6 +1512,7 @@
   let visibilityReturnTimer = null;
   let lastVisibilityReturnPromptAt = 0;
   let driveReturnPromptRequested = false;
+  let sessionHeartbeatTimer = null;
 
   function resetGoogleSdkState() {
     logLine("resetGoogleSdkState: begin");
@@ -1544,6 +1557,7 @@
   let suppressMenuToggle = false;
   let projectPickerResolver = null;
   let projectPickerSelection = null;
+  let cachedSessionCookie = null;
 
   const isFileOrigin = window.location.protocol === "file:";
   const isLocalhostOrigin = ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
@@ -1655,6 +1669,298 @@
       true
     );
     logLine("ensureDriveConfigPresent: end");
+  }
+
+  function isGoogleTokenValid() {
+    if (!googleAccessToken) return false;
+    if (!googleTokenExpiry) return true;
+    return Date.now() < googleTokenExpiry;
+  }
+
+  function normalizeKeyedObject(value) {
+    if (!value) return {};
+    if (Array.isArray(value)) {
+      const obj = {};
+      value.forEach((key) => {
+        if (!key) return;
+        obj[String(key)] = {};
+      });
+      return obj;
+    }
+    if (typeof value !== "object") return {};
+    return value;
+  }
+
+  function normalizeCharacterInventory(characters = {}) {
+    const normalized = {};
+    Object.entries(characters || {}).forEach(([name, record]) => {
+      const cleanName = (name || "").trim();
+      if (!cleanName) return;
+      normalized[cleanName] = buildCharacterInventory(record || {});
+    });
+    return normalized;
+  }
+
+  function buildCharacterInventory(record) {
+    return {
+      sheet: record?.sheet || null,
+      photos: (record?.photos || []).map((p) => ({
+        driveId: p.driveId || null,
+        vectorId: p.vectorId || null,
+        type: p.type || null,
+        name: p.name || null,
+      })),
+      draftPhotos: (record?.draftPhotos || []).map((p) => ({
+        driveId: p.driveId || null,
+        vectorId: p.vectorId || null,
+        type: p.type || null,
+        name: p.name || null,
+      })),
+      settings: record?.settings || null,
+    };
+  }
+
+  function buildProjectInventorySnapshot(project) {
+    const safeProject = ensureProjectStructure(project || { name: "" });
+    const characterInventory = {};
+    Object.entries(safeProject.characters || {}).forEach(([name, record]) => {
+      characterInventory[name] = buildCharacterInventory(record);
+    });
+
+    return {
+      name: safeProject.name,
+      drive: safeProject.drive,
+      driveMappings: safeProject.driveMappings || {},
+      assistants: safeProject.assistants || {},
+      vectorStores: safeProject.vectorStores || {},
+      outlines: Object.keys(safeProject.outlines || {}),
+      chapters: Object.keys(safeProject.chapters || {}),
+      characters: characterInventory,
+      audio: safeProject.audio || {},
+    };
+  }
+
+  function buildSessionCookiePayload() {
+    const snapshot = {
+      version: SESSION_COOKIE_VERSION,
+      updatedAt: new Date().toISOString(),
+      google: {
+        accessToken: googleAccessToken || null,
+        expiresAt: googleTokenExpiry || null,
+        email: googleUserEmail || null,
+      },
+      selection: {
+        currentProjectName,
+        currentCharacterName,
+        assistantModel,
+        apiKeySet: !!apiKey,
+      },
+      projects: {},
+    };
+
+    Object.entries(projects || {}).forEach(([name, project]) => {
+      snapshot.projects[name] = buildProjectInventorySnapshot(project);
+    });
+    return snapshot;
+  }
+
+  function sanitizePersistedProjects(rawProjects) {
+    const sanitized = {};
+    Object.entries(rawProjects || {}).forEach(([key, value]) => {
+      const cleanName = key.replace(/^novel -/i, "").trim();
+      const normalized = ensureProjectStructure({ ...(value || {}), name: (value && value.name) || cleanName });
+      sanitized[cleanName] = normalized;
+    });
+    return sanitized;
+  }
+
+  function mergePersistedProjects(primary, secondary) {
+    const merged = {};
+    const keys = new Set([...(Object.keys(primary || {})), ...(Object.keys(secondary || {}))]);
+    keys.forEach((name) => {
+      const mergedProject = ensureProjectStructure({ ...(secondary?.[name] || {}), ...(primary?.[name] || {}), name });
+      merged[name] = mergedProject;
+    });
+    return merged;
+  }
+
+  function normalizeSessionCookie(session) {
+    if (!session) return null;
+    if (session.version && session.version !== SESSION_COOKIE_VERSION) {
+      logLine(`Ignoring stale session cookie version ${session.version}; expected ${SESSION_COOKIE_VERSION}.`, true);
+      return null;
+    }
+
+    const normalized = { ...session, version: SESSION_COOKIE_VERSION };
+    normalized.updatedAt = session.updatedAt || new Date().toISOString();
+    normalized.selection = session.selection || {};
+    normalized.projects = sanitizePersistedProjects(session.projects || {});
+    normalized.google = session.google || {};
+
+    if (typeof normalized.google.expiresAt === "string") {
+      const parsed = Date.parse(normalized.google.expiresAt);
+      normalized.google.expiresAt = Number.isNaN(parsed) ? null : parsed;
+    }
+    if (normalized.google.accessToken && normalized.google.expiresAt && Date.now() >= normalized.google.expiresAt) {
+      logLine("Cached Google token expired inside cookie; dropping stored token and email.", true);
+      normalized.google.accessToken = null;
+      normalized.google.expiresAt = null;
+      normalized.google.email = null;
+    }
+
+    cachedSessionCookie = normalized;
+    return normalized;
+  }
+
+  function refreshSessionCookie(reason = "state update") {
+    try {
+      const payload = buildSessionCookiePayload();
+      writeCookie(SESSION_COOKIE_NAME, JSON.stringify(payload));
+      logLine(`Session cookie refreshed (${reason}).`);
+    } catch (e) {
+      logLine("Failed to refresh session cookie: " + e.message, true);
+    }
+  }
+
+  function startSessionHeartbeat() {
+    if (sessionHeartbeatTimer) {
+      clearInterval(sessionHeartbeatTimer);
+    }
+    sessionHeartbeatTimer = setInterval(() => {
+      refreshSessionCookie("heartbeat");
+    }, SESSION_HEARTBEAT_MS);
+    logLine("Session heartbeat started to keep cookies warm.");
+  }
+
+  function loadSessionCookie() {
+    const raw = readCookieValue(SESSION_COOKIE_NAME);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(decodeURIComponent(raw));
+      return normalizeSessionCookie(parsed);
+    } catch (e) {
+      logLine("Failed to parse session cookie: " + e.message, true);
+      cachedSessionCookie = null;
+      clearCookie(SESSION_COOKIE_NAME);
+      return null;
+    }
+  }
+
+  function hydrateStateFromSessionCookie(session) {
+    if (!session) return;
+    if (session.google?.accessToken) {
+      googleAccessToken = session.google.accessToken;
+      googleTokenExpiry = session.google.expiresAt || null;
+      googleAuthorized = isGoogleTokenValid();
+      googleUserEmail = session.google.email || null;
+    }
+
+    if (session.selection?.currentProjectName) {
+      currentProjectName = session.selection.currentProjectName;
+    }
+    if (session.selection?.currentCharacterName) {
+      currentCharacterName = session.selection.currentCharacterName;
+    }
+    if (session.selection?.assistantModel && ASSISTANT_MODELS.includes(session.selection.assistantModel)) {
+      assistantModel = session.selection.assistantModel;
+    }
+  }
+
+  function clearSavedSession() {
+    clearCookie(SESSION_COOKIE_NAME);
+    cachedSessionCookie = null;
+    if (sessionHeartbeatTimer) {
+      clearInterval(sessionHeartbeatTimer);
+      sessionHeartbeatTimer = null;
+    }
+    googleAccessToken = null;
+    googleTokenExpiry = null;
+    googleAuthorized = false;
+    googleUserEmail = null;
+    currentProjectName = null;
+    currentCharacterName = null;
+    if (window.gapi?.client) {
+      try {
+        gapi.client.setToken(null);
+      } catch (e) {
+        // ignore
+      }
+    }
+    setAuthStatus("Session cleared. Sign in with Google Drive to continue.");
+    setStatus("Session cookie cleared. Please sign in again.");
+    setAppLocked(true);
+    logLine("Session cookie cleared and Google auth reset.");
+  }
+
+  async function attemptSessionResumeFromCookie() {
+    const session = cachedSessionCookie || loadSessionCookie();
+    if (!session) {
+      logLine("No session cookie available to resume.");
+      return false;
+    }
+
+    hydrateStateFromSessionCookie(session);
+    if (!googleAccessToken || !isGoogleTokenValid()) {
+      logLine("Session cookie found but Google token is missing or expired.");
+      return false;
+    }
+
+    try {
+      await prepareGoogleSdk();
+      if (!googleDriveReady) return false;
+      gapi.client.setToken({ access_token: googleAccessToken });
+      googleAuthorized = true;
+      await fetchGoogleProfile();
+      setAuthStatus(`Google session restored${googleUserEmail ? ` for ${googleUserEmail}` : ""}.`);
+      logLine("Restored Google session from cookie.");
+    } catch (e) {
+      logLine("Failed to restore session from cookie: " + e.message, true);
+      return false;
+    }
+
+    refreshProjectListUI();
+
+    if (currentProjectName && projects[currentProjectName]) {
+      const label = PROJECT_PREFIX + currentProjectName;
+      const shouldRefresh = confirm(
+        `Resume ${label} from your saved session?\n\nClick OK to refresh assistants and vector files from Drive. Click Cancel to continue as-is with cached IDs.`
+      );
+      try {
+        await selectProject(currentProjectName);
+        if (shouldRefresh) {
+          await reloadCurrentProjectFromDrive();
+        } else {
+          setStatus(`Continuing with cached IDs for ${label}.`);
+          logLine(`Resumed ${label} from session cookie without forcing a Drive refresh.`);
+        }
+      } catch (e) {
+        logLine("Project selection during session resume failed: " + e.message, true);
+      }
+    } else {
+      setStatus("Google session restored. Pick a Drive project to continue.");
+    }
+
+    setAppLocked(false);
+    refreshSessionCookie("session resumed");
+    return true;
+  }
+
+  function readCookieValue(name) {
+    const target = name + "=";
+    const parts = document.cookie.split(";").map((p) => p.trim());
+    const match = parts.find((p) => p.startsWith(target));
+    if (!match) return null;
+    return match.substring(target.length);
+  }
+
+  function writeCookie(name, value, days = SESSION_COOKIE_MAX_DAYS) {
+    const encoded = encodeURIComponent(value);
+    const maxAge = days * 24 * 60 * 60;
+    document.cookie = `${name}=${encoded}; max-age=${maxAge}; path=/; SameSite=Lax`;
+  }
+
+  function clearCookie(name) {
+    document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
   }
 
   async function waitForGoogleSdk() {
@@ -1843,10 +2149,13 @@
         }
         googleAccessToken = resp.access_token;
         googleAuthorized = true;
+        const lifetimeSeconds = Number(resp.expires_in) || 3600;
+        googleTokenExpiry = Date.now() + Math.max(lifetimeSeconds - 60, 60) * 1000;
         gapi.client.setToken({ access_token: googleAccessToken });
         await fetchGoogleProfile();
         setAuthStatus("Authorized. Loading Drive projects...");
         logLine("requestGoogleAuth: authorization successful.");
+        refreshSessionCookie("google auth granted");
         resolve(resp);
       };
       googleTokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
@@ -1855,7 +2164,13 @@
 
   async function ensureGoogleAuthorized() {
     logLine("ensureGoogleAuthorized: begin");
-    if (googleAuthorized && googleAccessToken) return true;
+    if (googleAuthorized && googleAccessToken && isGoogleTokenValid()) return true;
+    if (googleAuthorized && googleAccessToken && !isGoogleTokenValid()) {
+      logLine("Cached Google token expired; requesting a fresh grant.");
+      googleAuthorized = false;
+      googleAccessToken = null;
+      googleTokenExpiry = null;
+    }
     try {
       await requestGoogleAuth(true);
       logLine("ensureGoogleAuthorized: authorized");
@@ -2097,6 +2412,9 @@
     lines.push(`Google Client ID present: ${!!googleClientId}`);
     lines.push(`API key configured: ${!!apiKey}`);
     lines.push(`Google SDK load promise active: ${!!googleSdkLoadPromise}`);
+    lines.push(`Session cookie present: ${!!readCookieValue(SESSION_COOKIE_NAME)}`);
+    lines.push(`Session heartbeat running: ${!!sessionHeartbeatTimer}`);
+    lines.push(`Cached session version: ${cachedSessionCookie?.version || "none"}`);
     lines.push(`GIS loaded: ${!!window.google?.accounts?.oauth2}`);
     lines.push(`gapi client loaded: ${!!window.gapi?.client}`);
     lines.push("Script status:");
@@ -2254,21 +2572,28 @@
   }
 
   function loadProjectsFromStorage() {
+    let localProjects = {};
     try {
       const raw = localStorage.getItem(PROJECTS_KEY);
       const parsed = raw ? JSON.parse(raw) : {};
-      projects = {};
-      Object.entries(parsed).forEach(([key, value]) => {
-        const cleanName = key.replace(/^novel -/i, "").trim();
-        const normalized = { ...(value || {}), name: (value && value.name) || cleanName };
-        projects[cleanName] = ensureProjectStructure(normalized);
-      });
+      localProjects = sanitizePersistedProjects(parsed);
     } catch (e) {
       logLine("Failed to load projects from localStorage: " + e, true);
-      projects = {};
+      localProjects = {};
+    }
+
+    const session = normalizeSessionCookie(loadSessionCookie());
+    projects = mergePersistedProjects(session?.projects || {}, localProjects);
+
+    if (session) {
+      hydrateStateFromSessionCookie(session);
+      logLine("Loaded projects from session cookie and merged with cached backup.");
+    } else if (Object.keys(localProjects).length) {
+      logLine("Recovered projects from localStorage because no valid session cookie was available.", true);
     }
 
     updateProjectSummaryLabel();
+    refreshSessionCookie(session ? "session loaded" : "local cache restored");
   }
 
   function updateModelStatus() {
@@ -2548,6 +2873,7 @@
   function saveProjectsToStorage() {
     try {
       localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+      refreshSessionCookie("projects updated");
     } catch (e) {
       logLine("Failed to save projects to localStorage: " + e, true);
     }
@@ -2585,12 +2911,12 @@
 
   function ensureProjectStructure(project) {
     if (project.name) project.name = project.name.replace(/^novel -/i, "").trim();
-    if (!project.assistants) project.assistants = {};
-    if (!project.vectorStores) project.vectorStores = {};
-    if (!project.outlines) project.outlines = {};
-    if (!project.chapters) project.chapters = {};
+    project.assistants = normalizeKeyedObject(project.assistants);
+    project.vectorStores = normalizeKeyedObject(project.vectorStores);
+    project.outlines = normalizeKeyedObject(project.outlines);
+    project.chapters = normalizeKeyedObject(project.chapters);
     if (!project.storyArc) project.storyArc = null;
-    if (!project.characters) project.characters = {};
+    project.characters = normalizeCharacterInventory(project.characters);
     if (!project.audio) project.audio = { paragraphs: {}, merged: {} };
     project.audio.paragraphs = project.audio.paragraphs || {};
     project.audio.merged = project.audio.merged || {};
@@ -2602,10 +2928,10 @@
       preferences: project.narratorSettings?.preferences || {},
     };
     if (!project.drive) project.drive = { rootId: null, categoryFolders: {}, characterFolders: {}, characterDraftFolders: {} };
-    project.drive.categoryFolders = project.drive.categoryFolders || {};
-    project.drive.characterFolders = project.drive.characterFolders || {};
-    project.drive.characterDraftFolders = project.drive.characterDraftFolders || {};
-    if (!project.driveMappings) project.driveMappings = {};
+    project.drive.categoryFolders = normalizeKeyedObject(project.drive.categoryFolders);
+    project.drive.characterFolders = normalizeKeyedObject(project.drive.characterFolders);
+    project.drive.characterDraftFolders = normalizeKeyedObject(project.drive.characterDraftFolders);
+    project.driveMappings = normalizeKeyedObject(project.driveMappings);
     return project;
   }
 
@@ -2707,6 +3033,7 @@
       refreshCharacterSelectUI(project);
       $("#canvas-character-name").text("None");
       logLine("Cleared current character selection.");
+      refreshSessionCookie("character selection cleared");
       return;
     }
     ensureCharacterRecord(project, cleanName);
@@ -2763,6 +3090,7 @@
       .finally(() => {
         setStatus(`Project ${name} ready.`);
       });
+    refreshSessionCookie("project selected");
   }
 
   async function reloadCurrentProjectFromDrive() {
@@ -2837,6 +3165,7 @@
     refreshProjectListUI();
     setStatus("No Drive project selected.");
     logLine("Exited current Drive project. Pick another to continue.");
+    refreshSessionCookie("project exited");
   }
 
   async function createProject(rawName) {
@@ -6071,6 +6400,7 @@ Please:
 
   $(function () {
     loadProjectsFromStorage();
+    startSessionHeartbeat();
     loadModelPreference();
     refreshProjectListUI();
     refreshCharacterSelectUI({ characters: {} });
@@ -6087,7 +6417,10 @@ Please:
     setCharacterMode(characterConversationMode);
     collapseAllMenuPanels();
 
-    const handleReturnToPage = () => scheduleReturnPrompt(driveReturnPromptRequested);
+    const handleReturnToPage = () => {
+      refreshSessionCookie("visibility return");
+      scheduleReturnPrompt(driveReturnPromptRequested);
+    };
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) handleReturnToPage();
     });
@@ -6106,8 +6439,9 @@ Please:
       ensureDriveConfigPresent();
       $googleBtn.prop("disabled", true).text("Loading Google SDK...");
       prepareGoogleSdk()
-        .then(() => {
+        .then(async () => {
           $googleBtn.prop("disabled", false).text("Sign in with Google Drive");
+          await attemptSessionResumeFromCookie();
         })
         .catch(() => {
           $googleBtn.prop("disabled", true).text("Sign-in unavailable");
@@ -6360,6 +6694,11 @@ Please:
         updateApiKeySummary("Set");
         logLine("API key set in memory.");
       }
+      refreshSessionCookie("api key updated");
+    });
+
+    $("#clear-session-btn").on("click", function () {
+      clearSavedSession();
     });
 
     $("#create-project-btn").on("click", async function () {
