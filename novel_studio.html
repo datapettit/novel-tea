@@ -1483,7 +1483,21 @@
   const NEW_PROJECT_SENTINEL = "__new_story_project__";
   const DEFAULT_TTS_MODEL = "tts-1";
   const TTS_MODELS = ["tts-1", "tts-1-hd"];
-  const FALLBACK_VOICES = ["alloy", "ash", "coral", "echo", "shimmer", "verse"];
+  const FALLBACK_VOICES = [
+    "alloy",
+    "ash",
+    "ballad",
+    "coral",
+    "echo",
+    "fable",
+    "onyx",
+    "nova",
+    "sage",
+    "shimmer",
+    "verse",
+    "marin",
+    "cedar",
+  ];
   let openAIVoices = [...FALLBACK_VOICES];
   let voicesLoaded = false;
   const FFMPEG_SCRIPT_URL = "https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js";
@@ -1500,11 +1514,6 @@
   let googleInitPromise = null;
   let googleSdkLoadPromise = null;
   let googleUserEmail = null;
-  const VISIBILITY_RETURN_DEBOUNCE_MS = 1200;
-  const VISIBILITY_RETURN_COOLDOWN_MS = 8000;
-  let visibilityReturnTimer = null;
-  let lastVisibilityReturnPromptAt = 0;
-  let driveReturnPromptRequested = false;
   let sessionHeartbeatTimer = null;
 
   function resetGoogleSdkState() {
@@ -1914,17 +1923,11 @@
 
     if (currentProjectName && projects[currentProjectName]) {
       const label = PROJECT_PREFIX + currentProjectName;
-      const shouldRefresh = confirm(
-        `Resume ${label} from your saved session?\n\nClick OK to refresh assistants and vector files from Drive. Click Cancel to continue as-is with cached IDs.`
-      );
       try {
         await selectProject(currentProjectName);
-        if (shouldRefresh) {
-          await reloadCurrentProjectFromDrive();
-        } else {
-          setStatus(`Continuing with cached IDs for ${label}.`);
-          logLine(`Resumed ${label} from session cookie without forcing a Drive refresh.`);
-        }
+        await reloadCurrentProjectFromDrive();
+        setStatus(`Resumed ${label} with fresh Drive and vector sync.`);
+        logLine(`Resumed ${label} from session cookie and refreshed data automatically.`);
       } catch (e) {
         logLine("Project selection during session resume failed: " + e.message, true);
       }
@@ -3166,40 +3169,6 @@
     }
   }
 
-  function scheduleReturnPrompt(force = false) {
-    if (document.hidden) return;
-    if (!googleAuthorized || !googleDriveReady || !currentProjectName) return;
-
-    const now = Date.now();
-    if (!force && now - lastVisibilityReturnPromptAt < VISIBILITY_RETURN_COOLDOWN_MS) return;
-
-    if (visibilityReturnTimer) {
-      clearTimeout(visibilityReturnTimer);
-    }
-
-    visibilityReturnTimer = setTimeout(async () => {
-      visibilityReturnTimer = null;
-      if (document.hidden) return;
-
-      lastVisibilityReturnPromptAt = Date.now();
-      driveReturnPromptRequested = false;
-      const label = `${PROJECT_PREFIX}${currentProjectName}`;
-      const confirmReload = confirm(
-        `You're back in Novel Studio. Reload Drive data and resync vector stores for ${label}?`
-      );
-      if (confirmReload) {
-        await reloadCurrentProjectFromDrive();
-      } else {
-        logLine(`Skipped reload after returning to the page for ${label}.`);
-      }
-    }, VISIBILITY_RETURN_DEBOUNCE_MS);
-  }
-
-  function requestDriveReturnResyncPrompt() {
-    driveReturnPromptRequested = true;
-    scheduleReturnPrompt(true);
-  }
-
   function exitDriveProject() {
     currentProjectName = null;
     $("#current-project-name").text("None");
@@ -3386,23 +3355,9 @@
 
   async function fetchOpenAIVoices(force = false) {
     if (voicesLoaded && !force) return openAIVoices;
-    logLine(`Fetching OpenAI voices (force=${force})...`);
-    try {
-      const res = await openaiJson("/audio/voices", "GET", null, false, "Fetch OpenAI voices");
-      if (res?.voices && Array.isArray(res.voices) && res.voices.length) {
-        openAIVoices = res.voices
-          .map((v) => (typeof v === "string" ? v : v.id || v.name))
-          .filter(Boolean);
-        voicesLoaded = true;
-        logLine(`Loaded ${openAIVoices.length} voices from OpenAI: ${openAIVoices.join(", ")}`);
-        return openAIVoices;
-      }
-      logLine("OpenAI voice list returned no voices; using fallback list.", true);
-    } catch (e) {
-      logLine(`Unable to load voices from OpenAI, using fallback list: ${e.message}`, true);
-    }
     openAIVoices = [...FALLBACK_VOICES];
-    logLine(`Using fallback voices (${openAIVoices.length}): ${openAIVoices.join(", ")}`);
+    voicesLoaded = true;
+    logLine(`Using hardcoded voices (${openAIVoices.length}): ${openAIVoices.join(", ")}`);
     return openAIVoices;
   }
 
@@ -3689,9 +3644,41 @@
 
   async function ensureVectorStore(project, category) {
     project.vectorStores = project.vectorStores || {};
-    if (project.vectorStores[category]) {
-      logLine(`Using cached vector store for '${category}': ${project.vectorStores[category]}`);
-      return project.vectorStores[category];
+    const existingId = project.vectorStores[category];
+    if (existingId) {
+      try {
+        const details = await openaiJson(
+          `/vector_stores/${existingId}`,
+          "GET",
+          null,
+          true,
+          `validate vector store ${project.name}/${category}`
+        );
+        if (details && details.id === existingId) {
+          const failedCount = details.file_counts?.failed || 0;
+          const inProgress = details.file_counts?.in_progress || 0;
+          if (failedCount > 0) {
+            logLine(
+              `Vector store '${category}' has ${failedCount} failed file(s); consider re-uploading recent documents if lookups fail.`,
+              true
+            );
+          }
+          if (inProgress > 0) {
+            logLine(
+              `Vector store '${category}' is still indexing ${inProgress} file(s); some searches may be incomplete until finished.`
+            );
+          }
+          logLine(`Using cached vector store for '${category}': ${existingId}`);
+          return existingId;
+        }
+      } catch (e) {
+        logLine(
+          `Cached vector store '${category}' (${existingId}) was invalid or missing; recreating. Error: ${e.message}`,
+          true
+        );
+        delete project.vectorStores[category];
+        saveProjectsToStorage();
+      }
     }
 
     const label = `vector store create ${project.name}/${category}`;
@@ -4995,6 +4982,14 @@ Return the full updated sheet text only.
   async function uploadDocsToVectorStore(vsId, docs, labelPrefix) {
     const ordered = sortStoryDocs(docs);
     const uploadedNames = [];
+    let existingFileIds = new Set();
+    try {
+      const existing = await listVectorStoreFiles(vsId);
+      existingFileIds = new Set((existing.data || []).map((f) => f.id));
+    } catch (e) {
+      logLine(`[uploadDocsToVectorStore] Could not preflight list files for ${vsId}: ${e.message}`, true);
+    }
+
     for (let i = 0; i < ordered.length; i++) {
       const doc = ordered[i];
       try {
@@ -5007,6 +5002,12 @@ Return the full updated sheet text only.
           type: content.blob.type || "application/octet-stream",
         });
         const uploadRes = await uploadFileToOpenAI(fileObj);
+        if (existingFileIds.has(uploadRes.id)) {
+          logLine(
+            `[uploadDocsToVectorStore] Skipping attach for ${safeName}; file ${uploadRes.id} already present in ${vsId}.`
+          );
+          continue;
+        }
         await attachFileToVectorStore(vsId, uploadRes.id);
         uploadedNames.push(safeName);
         logLine(`Attached ${safeName} to vector store ${vsId}.`);
@@ -6101,6 +6102,22 @@ Please:
     } catch (e) {
       logLine(`Assistant init while uploading to vector store failed: ${e.message}`, true);
     }
+    let existingVectorFileId = project.driveMappings?.[category]?.[driveFile.id];
+    if (existingVectorFileId) {
+      try {
+        const alreadyThere = await listVectorStoreFiles(vsId);
+        const found = (alreadyThere.data || []).some((f) => f.id === existingVectorFileId);
+        if (found) {
+          logLine(
+            `Drive file ${driveFile.id} already mapped to vector file ${existingVectorFileId}; skipping re-upload for ${category}.`
+          );
+          return existingVectorFileId;
+        }
+      } catch (e) {
+        logLine(`Vector store preflight check failed; will re-upload ${driveFile.name}. ${e.message}`);
+      }
+    }
+
     const fileObj = new File([content.blob], driveFile.name, { type: content.blob.type || "application/octet-stream" });
     const uploadRes = await uploadFileToOpenAI(fileObj);
     await attachFileToVectorStore(vsId, uploadRes.id);
@@ -6546,7 +6563,6 @@ Please:
           .attr("title", "Open in Google Drive")
           .text("↗️");
         $openDrive.on("click", () => {
-          requestDriveReturnResyncPrompt();
           window.open(driveUrl, "_blank", "noopener");
         });
         $actions.append($openDrive);
@@ -6754,15 +6770,6 @@ Please:
     setAppLocked(true);
     setCharacterMode(characterConversationMode);
     collapseAllMenuPanels();
-
-    const handleReturnToPage = () => {
-      refreshSessionCookie("visibility return");
-      scheduleReturnPrompt(driveReturnPromptRequested);
-    };
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) handleReturnToPage();
-    });
-    window.addEventListener("focus", handleReturnToPage);
 
     fetchOpenAIVoices()
       .then(() => refreshVoiceSelectors(getCurrentProject() || { name: "" }))
