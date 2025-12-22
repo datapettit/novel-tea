@@ -2462,7 +2462,7 @@
     if (!value) return value;
     if (header.toLowerCase() === "authorization") {
       const tail = value.slice(-6);
-      return value.startsWith("Bearer") ? `Bearer ***${tail}` : `***${tail}`;
+      return value.toLowerCase().startsWith("bearer") ? `Bearer ***${tail}` : `***${tail}`;
     }
     return value;
   }
@@ -3352,15 +3352,30 @@
   // OPENAI API HELPERS
   // ==============================
 
+  function sanitizeApiKey(rawKey) {
+    if (!rawKey) return "";
+    let cleaned = rawKey.trim();
+    // The Authorization header must be exactly "Bearer {KEY}"; strip any user-provided prefix to avoid
+    // sending "Bearer Bearer ..." and mismatched casing (per https://platform.openai.com/docs/api-reference/vector-stores/create).
+    const bearerPrefix = /^bearer\s+/i;
+    if (bearerPrefix.test(cleaned)) {
+      cleaned = cleaned.replace(bearerPrefix, "");
+      logLine(
+        `Normalized API key input by removing a 'Bearer' prefix to match the required Authorization header (${OPENAI_AUTH_DOC_URL}).`
+      );
+    }
+    return cleaned;
+  }
+
   function requireApiKey() {
-    if (!apiKey || !apiKey.trim()) {
+    apiKey = sanitizeApiKey(apiKey);
+    if (!apiKey) {
       logLine(
         `API key not set. Provide a valid OpenAI API key (see auth guide: ${OPENAI_AUTH_DOC_URL}).`,
         true
       );
       return false;
     }
-    apiKey = apiKey.trim();
     return true;
   }
 
