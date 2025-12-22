@@ -1543,6 +1543,8 @@
   // ==============================
 
   const DEFAULT_API_KEY = "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";
+  const OPENAI_AUTH_DOC_URL = "https://platform.openai.com/docs/guides/authentication";
+  const GLOBAL_VECTOR_STORE_KEY = "global_drive";
   let apiKey = DEFAULT_API_KEY;
   const PROJECTS_KEY = "novelStudioProjects"; // localStorage key
   const MODEL_KEY = "novelStudioAssistantModel";
@@ -1636,7 +1638,7 @@
     $("#google-client-id-input").val(googleClientId);
     updateGoogleClientIdStatus();
   }
-  let projects = {}; // { projectName: {name, assistants, vectorStores, outlines, chapters} }
+  let projects = {}; // { projectName: {name, assistants, globalVectorStoreId, outlines, chapters} }
   let currentProjectName = null;
   let assistantModel = ASSISTANT_MODELS[0];
   let currentCharacterName = null;
@@ -1824,7 +1826,7 @@
       drive: safeProject.drive,
       driveMappings: safeProject.driveMappings || {},
       assistants: safeProject.assistants || {},
-      vectorStores: safeProject.vectorStores || {},
+      globalVectorStoreId: safeProject.globalVectorStoreId || null,
       outlines: Object.keys(safeProject.outlines || {}),
       chapters: Object.keys(safeProject.chapters || {}),
       characters: characterInventory,
@@ -2707,6 +2709,9 @@
     return fetch(url, merged)
       .then((res) => {
         logLine(`[${label}] response received with status ${res.status}.`);
+        if (res.status >= 400) {
+          logLine(`[${label}] Alert: received ${res.status} response.`, true);
+        }
         return res;
       })
       .catch((err) => {
@@ -3068,6 +3073,15 @@
     if (project.name) project.name = project.name.replace(/^novel -/i, "").trim();
     project.assistants = normalizeKeyedObject(project.assistants);
     project.vectorStores = normalizeKeyedObject(project.vectorStores);
+    if (!project.globalVectorStoreId) {
+      const legacyId = Object.values(project.vectorStores || {}).find(Boolean);
+      if (legacyId) {
+        project.globalVectorStoreId = legacyId;
+      }
+    }
+    if (project.globalVectorStoreId) {
+      project.vectorStores[GLOBAL_VECTOR_STORE_KEY] = project.globalVectorStoreId;
+    }
     project.outlines = normalizeKeyedObject(project.outlines);
     project.chapters = normalizeKeyedObject(project.chapters);
     if (!project.storyArc) project.storyArc = null;
@@ -3339,11 +3353,30 @@
   // ==============================
 
   function requireApiKey() {
-    if (!apiKey) {
-      logLine("API key not set. Please enter and set your OpenAI API key.", true);
+    if (!apiKey || !apiKey.trim()) {
+      logLine(
+        `API key not set. Provide a valid OpenAI API key (see auth guide: ${OPENAI_AUTH_DOC_URL}).`,
+        true
+      );
       return false;
     }
+    apiKey = apiKey.trim();
     return true;
+  }
+
+  function logHttpErrorResponse(label, res, responseText) {
+    const statusFamily = res.status >= 500 ? "server" : "client";
+    const detail = responseText || res.statusText || "(no body)";
+    logLine(`[${label}] ${statusFamily.toUpperCase()} error ${res.status}: ${detail}`, true);
+    if (res.status >= 400) {
+      logLine(`[${label}] HTTP ${res.status} received. Inspect payload and auth before retrying.`, true);
+    }
+    if (res.status === 401 || res.status === 403) {
+      logLine(
+        `[${label}] Authentication/authorization failed (${res.status}). Verify your key and project access per ${OPENAI_AUTH_DOC_URL}.`,
+        true
+      );
+    }
   }
 
   async function openaiJson(path, method = "POST", body = null, useAssistantsBeta = false, label = null) {
@@ -3366,7 +3399,7 @@
       if (!res.ok) {
         const text = await res.text();
         const payload = body ? JSON.stringify(body) : "(no payload)";
-        logLine(`OpenAI API error ${res.status} for ${method} ${url}: ${text}. Payload: ${payload}`, true);
+        logHttpErrorResponse(requestLabel, res, text);
         throw new Error("OpenAI API error (" + res.status + "): " + text);
       }
       return await res.json();
@@ -3400,7 +3433,7 @@
       }, requestLabel);
       if (!res.ok) {
         const text = await res.text();
-        logLine(`OpenAI form-data error ${res.status} for POST ${url}: ${text}. Payload: [form data]`, true);
+        logHttpErrorResponse(requestLabel, res, text);
         throw new Error("OpenAI API error (" + res.status + "): " + text);
       }
       return await res.json();
@@ -3430,7 +3463,7 @@
       }, requestLabel);
       if (!res.ok) {
         const text = await res.text();
-        logLine(`OpenAI audio error ${res.status} for POST ${url}: ${text}. Payload: ${JSON.stringify(body)}`, true);
+        logHttpErrorResponse(requestLabel, res, text);
         throw new Error("OpenAI Audio API error (" + res.status + "): " + text);
       }
       // Expect binary audio
@@ -3748,9 +3781,10 @@
   // OPENAI RESOURCES (ASSISTANTS, VECTOR STORES, FILES)
   // ==============================
 
-  async function ensureVectorStore(project, category) {
-    project.vectorStores = project.vectorStores || {};
-    const existingId = project.vectorStores[category];
+  async function ensureVectorStore(project, category = "global") {
+    ensureProjectStructure(project);
+    const labelContext = `${project.name}/${category}`;
+    const existingId = project.globalVectorStoreId || project.vectorStores?.[GLOBAL_VECTOR_STORE_KEY];
     if (existingId) {
       try {
         const details = await openaiJson(
@@ -3758,7 +3792,7 @@
           "GET",
           null,
           true,
-          `validate vector store ${project.name}/${category}`
+          `validate vector store ${labelContext}`
         );
         if (details && details.id === existingId) {
           const failedCount = details.file_counts?.failed || 0;
@@ -3774,7 +3808,7 @@
               `Vector store '${category}' is still indexing ${inProgress} file(s); some searches may be incomplete until finished.`
             );
           }
-          logLine(`Using cached vector store for '${category}': ${existingId}`);
+          logLine(`Using global vector store for '${category}': ${existingId}`);
           return existingId;
         }
       } catch (e) {
@@ -3782,25 +3816,29 @@
           `Cached vector store '${category}' (${existingId}) was invalid or missing; recreating. Error: ${e.message}`,
           true
         );
-        delete project.vectorStores[category];
+        delete project.vectorStores?.[GLOBAL_VECTOR_STORE_KEY];
+        project.globalVectorStoreId = null;
         saveProjectsToStorage();
       }
     }
 
-    const label = `vector store create ${project.name}/${category}`;
+    const label = `vector store create ${project.name}/global`;
     try {
       const res = await openaiJson(
         "/vector_stores",
         "POST",
         {
-          name: project.name + " [" + category + "]",
+          name: `${project.name} [global_drive]`,
+          metadata: { scope: "google-drive" },
         },
         true,
         label
       );
       const vsId = res.id;
-      project.vectorStores[category] = vsId;
-      logLine("Created vector store for '" + category + "': " + vsId);
+      project.globalVectorStoreId = vsId;
+      project.vectorStores = project.vectorStores || {};
+      project.vectorStores[GLOBAL_VECTOR_STORE_KEY] = vsId;
+      logLine(`Created global vector store for '${project.name}': ${vsId}`);
       saveProjectsToStorage();
       return vsId;
     } catch (e) {
@@ -3847,7 +3885,8 @@
     const expectedTools = [];
     let toolResources = undefined;
     if (useFileSearch) {
-      const vsIds = Object.values(project.vectorStores || {});
+      const globalVectorStoreId = await ensureVectorStore(project, "global");
+      const vsIds = globalVectorStoreId ? [globalVectorStoreId] : [];
       expectedTools.push({ type: "file_search" });
       toolResources = {
         file_search: {
@@ -4041,8 +4080,6 @@ When asked about photos:
 - Be explicit about face angle, lighting, expression, and hair details for profile shots.
 `.trim();
 
-    project.vectorStores = project.vectorStores || {};
-
     const safeCreate = async (name, instructions, useFileSearch) => {
       try {
         await createOrGetAssistant(project, name, instructions, useFileSearch);
@@ -4051,6 +4088,8 @@ When asked about photos:
         throw e;
       }
     };
+
+    await ensureVectorStore(project, "global");
 
     await safeCreate("LoreKeeper", loreInstructions, true);
     await safeCreate("SeriesArchitect", architectInstructions, true);
@@ -6442,7 +6481,8 @@ Please:
       const mapped = project.driveMappings?.[category]?.[driveId];
       if (mapped) {
         try {
-          await deleteVectorStoreFile(project.vectorStores[category], mapped);
+          const vsId = await ensureVectorStore(project, category);
+          if (vsId) await deleteVectorStoreFile(vsId, mapped);
           await deleteOpenAIFile(mapped);
         } catch (e) {
           logLine("Failed to remove OpenAI mapping: " + e.message, true);
@@ -6746,7 +6786,7 @@ Please:
           try {
             const mapped = project.driveMappings?.[category]?.[doc.id];
             if (mapped) {
-              const vsId = project.vectorStores && project.vectorStores[category];
+              const vsId = await ensureVectorStore(project, category);
               if (vsId) await deleteVectorStoreFile(vsId, mapped);
               await deleteOpenAIFile(mapped);
             }
