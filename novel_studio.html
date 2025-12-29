@@ -3394,6 +3394,45 @@
     }
   }
 
+  function headersToObject(headers) {
+    if (!headers) return {};
+    if (headers instanceof Headers) {
+      const entries = {};
+      headers.forEach((value, key) => {
+        entries[key] = value;
+      });
+      return entries;
+    }
+    if (typeof headers === "object") {
+      return { ...headers };
+    }
+    return {};
+  }
+
+  function redactHeaders(headers) {
+    const output = {};
+    const entries = headersToObject(headers);
+    Object.entries(entries).forEach(([key, value]) => {
+      output[key] = redactHeaderValue(key, value);
+    });
+    return output;
+  }
+
+  function logRawHttpExchange(label, requestInfo, res, responseText) {
+    const requestHeaders = redactHeaders(requestInfo.headers);
+    const responseHeaders = redactHeaders(res?.headers);
+    const requestBody = requestInfo.body || "(no body)";
+    const responseBody = responseText || "(no body)";
+    logLine(
+      `[${label}] RAW REQUEST: ${requestInfo.method} ${requestInfo.url} headers=${JSON.stringify(requestHeaders)} body=${requestBody}`,
+      true
+    );
+    logLine(
+      `[${label}] RAW RESPONSE: status=${res.status} ${res.statusText} headers=${JSON.stringify(responseHeaders)} body=${responseBody}`,
+      true
+    );
+  }
+
   async function openaiJson(path, method = "POST", body = null, useAssistantsBeta = false, label = null) {
     if (!requireApiKey()) throw new Error("No API key");
     const headers = {
@@ -3478,6 +3517,12 @@
       }, requestLabel);
       if (!res.ok) {
         const text = await res.text();
+        logRawHttpExchange(
+          requestLabel,
+          { method: "POST", url, headers, body: JSON.stringify(body) },
+          res,
+          text
+        );
         logHttpErrorResponse(requestLabel, res, text);
         throw new Error("OpenAI Audio API error (" + res.status + "): " + text);
       }
